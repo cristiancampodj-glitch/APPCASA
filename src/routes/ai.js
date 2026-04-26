@@ -19,7 +19,7 @@ router.post('/ask', requireAuth, async (req, res, next) => {
         const r = await client.chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: 'Eres el asistente de Casa SaaS. Responde breve, en español, con datos del contexto.' },
+            { role: 'system', content: 'Eres el asistente de Mi Casa. Responde breve, en español, con datos del contexto.' },
             { role: 'system', content: 'CONTEXTO: ' + JSON.stringify(ctx) },
             { role: 'user', content: prompt }
           ]

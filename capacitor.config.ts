@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.cristiancampo.casasaas',
-  appName: 'Casa SaaS',
+  appName: 'Mi Casa',
   webDir: 'public',
   server: {
     // Cambia a tu URL de producción de Railway para que la app móvil llame al backend

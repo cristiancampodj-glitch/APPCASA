@@ -1,4 +1,4 @@
-/* Casa SaaS v3 — Frontend SPA (vanilla JS, sin frameworks) */
+/* Mi Casa v3 — Frontend SPA (vanilla JS, sin frameworks) */
 (() => {
 'use strict';
 
@@ -192,7 +192,7 @@ function renderAuth() {
   function paint() {
     card.innerHTML = '';
     card.append(
-      el('h1', {}, '🏡 Casa SaaS'),
+      el('h1', {}, '🏡 Mi Casa'),
       el('div', { class: 'sub' }, mode === 'login' ? 'Inicia sesión en tu casa' : 'Crea tu cuenta'),
       el('div', { class: 'auth-tabs' },
         el('button', { class: mode === 'login' ? 'active' : '', onclick: () => { mode='login'; paint(); } }, 'Iniciar sesión'),
@@ -259,7 +259,7 @@ function renderLayout() {
   );
 
   const sidebar = el('aside', { class: 'sidebar' },
-    el('div', { class: 'brand' }, el('span', { class: 'brand-icon' }, '🏡'), 'Casa SaaS'),
+    el('div', { class: 'brand' }, el('span', { class: 'brand-icon' }, '🏡'), 'Mi Casa'),
     el('nav', { class: 'nav' }, ...navItems),
     el('div', { class: 'sidebar-footer' },
       el('div', { style: { padding: '8px 10px', fontSize: '13px', color: 'var(--text-muted)' } },

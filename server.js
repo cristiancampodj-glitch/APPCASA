@@ -1,5 +1,5 @@
 /**
- * Casa SaaS v3 - Backend Express + Postgres
+ * Mi Casa v3 - Backend Express + Postgres
  * Compatible Railway / Render / Fly / cualquier PaaS Node 18+
  */
 require('dotenv').config();
@@ -71,6 +71,6 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Casa SaaS v3 escuchando en puerto ${PORT}`);
+  console.log(`Mi Casa v3 escuchando en puerto ${PORT}`);
   console.log(`Health: http://localhost:${PORT}/api/health`);
 });

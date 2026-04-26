@@ -10,7 +10,7 @@ async function generateReceipt(stream, payment) {
   doc.pipe(stream);
 
   // Header
-  doc.fillColor('#0f172a').fontSize(24).text('Casa SaaS — Recibo de Pago', { align: 'left' });
+  doc.fillColor('#0f172a').fontSize(24).text('Mi Casa — Recibo de Pago', { align: 'left' });
   doc.moveDown(0.3);
   doc.fillColor('#64748b').fontSize(10).text(`ID: ${payment.id}`);
   doc.moveDown(2);
@@ -49,7 +49,7 @@ async function generateReceipt(stream, payment) {
 
   // Footer
   doc.fontSize(9).fillColor('#94a3b8').text(
-    'Documento generado electrónicamente. Casa SaaS — gestión de propiedades.',
+    'Documento generado electrónicamente. Mi Casa — gestión de propiedades.',
     50, 760, { align: 'center', width: 495 }
   );
 
