@@ -64,6 +64,19 @@ Abre <http://localhost:8000>
 ### Opción 3 — Hosting gratuito
 Sube esta carpeta a **GitHub Pages**, **Netlify** o **Vercel** y compártela con tus inquilinos.
 
+### Opción 4 — Deploy en Railway 🚂
+1. Ve a <https://railway.com/new>
+2. **Deploy from GitHub repo** → selecciona `cristiancampodj-glitch/APPCASA`
+3. Railway detecta automáticamente Node.js (Nixpacks)
+4. Click en **Generate Domain** (Settings → Networking) para obtener URL pública
+5. ¡Listo! Cada `git push` redespliega automáticamente
+
+El proyecto incluye:
+- `server.js` — servidor Node sin dependencias (usa `process.env.PORT`)
+- `package.json` — script `npm start`
+- `railway.json` — configuración de deploy
+- `Procfile` — fallback universal
+
 ## 🧪 Probarla rápido
 
 1. **Regístrate como Dueño** → se crea tu primera propiedad con código (ej. `CASA-A3F2`)

@@ -1,0 +1,15 @@
+{
+  "name": "casa-saas",
+  "version": "2.0.0",
+  "description": "Casa SaaS - Plataforma de gestión inmobiliaria",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "Cristian Campo",
+  "license": "MIT"
+}
