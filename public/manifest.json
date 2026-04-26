@@ -1,11 +1,13 @@
 {
-  "name": "Casa - Organización del hogar",
-  "short_name": "Casa",
-  "description": "Aseo, basura, gas y tareas de la casa",
-  "start_url": "./index.html",
+  "name": "Casa SaaS — Gestión Inmobiliaria",
+  "short_name": "Casa SaaS",
+  "description": "Plataforma SaaS para gestión integral de propiedades en arriendo",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "orientation": "portrait",
+  "background_color": "#0ea5e9",
+  "theme_color": "#0ea5e9",
   "lang": "es",
   "icons": [
     {

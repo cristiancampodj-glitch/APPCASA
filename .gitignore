@@ -2,4 +2,18 @@ node_modules/
 .DS_Store
 *.log
 .env
+.env.local
 .vscode/
+
+# Capacitor / Mobile
+android/
+ios/
+.capacitor/
+
+# Build artifacts
+dist/
+build/
+*.apk
+*.aab
+*.ipa
+

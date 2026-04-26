@@ -1,64 +1,75 @@
 /**
- * Casa SaaS - Servidor estático mínimo
- * Sin dependencias externas. Sirve los archivos del proyecto.
- * Compatible con Railway, Render, Fly, etc. (usa PORT del entorno)
+ * Casa SaaS v3 - Backend Express + Postgres
+ * Compatible Railway / Render / Fly / cualquier PaaS Node 18+
  */
-const http = require('http');
-const fs = require('fs');
+require('dotenv').config();
 const path = require('path');
+const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
 
+const app = express();
 const PORT = process.env.PORT || 3000;
-const ROOT = __dirname;
 
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.css':  'text/css; charset=utf-8',
-  '.js':   'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg':  'image/svg+xml',
-  '.png':  'image/png',
-  '.jpg':  'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico':  'image/x-icon',
-  '.webmanifest': 'application/manifest+json'
-};
+// --- Seguridad y middlewares base ---
+app.use(helmet({ contentSecurityPolicy: false })); // CSP desactivada para PWA inline
+app.use(cors({ origin: true, credentials: true }));
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-const server = http.createServer((req, res) => {
-  try {
-    let urlPath = decodeURIComponent(req.url.split('?')[0]);
-    if (urlPath === '/') urlPath = '/index.html';
+// Rate limit global suave
+app.use('/api/', rateLimit({ windowMs: 60 * 1000, max: 200, standardHeaders: true }));
+// Rate limit estricto para auth
+app.use('/api/auth/', rateLimit({ windowMs: 60 * 1000, max: 20 }));
 
-    // Seguridad: prevenir path traversal
-    const safePath = path.normalize(path.join(ROOT, urlPath));
-    if (!safePath.startsWith(ROOT)) {
-      res.writeHead(403); return res.end('Forbidden');
-    }
+// --- Salud ---
+app.get('/api/health', (req, res) => res.json({ ok: true, version: '3.0.0', ts: Date.now() }));
 
-    fs.stat(safePath, (err, stat) => {
-      if (err || !stat.isFile()) {
-        // SPA fallback -> index.html
-        const fallback = path.join(ROOT, 'index.html');
-        return fs.readFile(fallback, (e, data) => {
-          if (e) { res.writeHead(404); return res.end('Not Found'); }
-          res.writeHead(200, { 'Content-Type': MIME['.html'] });
-          res.end(data);
-        });
-      }
-      const ext = path.extname(safePath).toLowerCase();
-      const type = MIME[ext] || 'application/octet-stream';
-      const stream = fs.createReadStream(safePath);
-      res.writeHead(200, {
-        'Content-Type': type,
-        'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
-        'X-Content-Type-Options': 'nosniff'
-      });
-      stream.pipe(res);
-    });
-  } catch (e) {
-    res.writeHead(500); res.end('Internal Server Error');
+// --- Rutas API ---
+app.use('/api/auth',          require('./src/routes/auth'));
+app.use('/api/users',         require('./src/routes/users'));
+app.use('/api/houses',        require('./src/routes/houses'));
+app.use('/api/payments',      require('./src/routes/payments'));
+app.use('/api/damages',       require('./src/routes/damages'));
+app.use('/api/pqrs',          require('./src/routes/pqrs'));
+app.use('/api/chores',        require('./src/routes/chores'));
+app.use('/api/announcements', require('./src/routes/announcements'));
+app.use('/api/messages',      require('./src/routes/messages'));
+app.use('/api/inventory',     require('./src/routes/inventory'));
+app.use('/api/expenses',      require('./src/routes/expenses'));
+app.use('/api/events',        require('./src/routes/events'));
+app.use('/api/bookings',      require('./src/routes/bookings'));
+app.use('/api/polls',         require('./src/routes/polls'));
+app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/dashboard',     require('./src/routes/dashboard'));
+app.use('/api/ai',            require('./src/routes/ai'));
+app.use('/api/admin',         require('./src/routes/admin'));
+
+// --- Webhooks (sin auth, validados con firma) ---
+app.use('/webhooks', require('./src/routes/webhooks'));
+
+// --- Frontend estático (PWA) ---
+const PUBLIC_DIR = path.join(__dirname, 'public');
+app.use(express.static(PUBLIC_DIR, {
+  maxAge: '1h',
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
   }
+}));
+
+// SPA fallback
+app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+
+// --- Manejo errores ---
+app.use((err, req, res, next) => {
+  console.error('[ERR]', err);
+  res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
 });
 
-server.listen(PORT, () => {
-  console.log(`🏡 Casa SaaS escuchando en puerto ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`Casa SaaS v3 escuchando en puerto ${PORT}`);
+  console.log(`Health: http://localhost:${PORT}/api/health`);
 });
