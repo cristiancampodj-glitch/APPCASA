@@ -1,202 +1,119 @@
-/* Mi Casa v3 — Frontend SPA (vanilla JS, sin frameworks) */
+/* ============================================================
+   Mi Casa — App SPA (vanilla JS, simple, intuitiva)
+   ============================================================ */
 (() => {
 'use strict';
 
-// ============= API CLIENT =============
+// ===================== API =====================
 const API = {
-  base: '',
   token: () => localStorage.getItem('token'),
-  setToken(t) { t ? localStorage.setItem('token', t) : localStorage.removeItem('token'); },
-  user: () => JSON.parse(localStorage.getItem('user') || 'null'),
-  setUser(u) { u ? localStorage.setItem('user', JSON.stringify(u)) : localStorage.removeItem('user'); },
+  setToken: (t) => t ? localStorage.setItem('token', t) : localStorage.removeItem('token'),
   async req(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-    const t = this.token();
-    if (t) headers.Authorization = `Bearer ${t}`;
-    const r = await fetch(this.base + path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    const tk = this.token(); if (tk) headers.Authorization = `Bearer ${tk}`;
+    const r = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
     let data; try { data = await r.json(); } catch { data = {}; }
     if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
     return data;
   },
-  get(p)        { return this.req(p); },
-  post(p, b)    { return this.req(p, { method: 'POST', body: b }); },
-  patch(p, b)   { return this.req(p, { method: 'PATCH', body: b }); },
-  del(p)        { return this.req(p, { method: 'DELETE' }); }
+  get(p)     { return this.req(p); },
+  post(p, b) { return this.req(p, { method:'POST', body: b }); },
+  patch(p,b) { return this.req(p, { method:'PATCH', body: b }); },
+  del(p)     { return this.req(p, { method:'DELETE' }); }
 };
 
-// ============= I18N =============
-const I18N = {
-  locale: localStorage.getItem('locale') || 'es',
-  dict: {
-    es: {
-      dashboard: 'Inicio', payments: 'Pagos', damages: 'Daños', pqrs: 'PQRS',
-      chores: 'Turnos', announcements: 'Anuncios', expenses: 'Gastos',
-      bookings: 'Reservas', polls: 'Votaciones', inventory: 'Inventario',
-      messages: 'Chat', users: 'Personas', settings: 'Ajustes', logout: 'Cerrar sesión',
-      welcome: 'Bienvenido', login: 'Iniciar sesión', register: 'Registrarse',
-      email: 'Correo', password: 'Contraseña', name: 'Nombre completo',
-      house_name: 'Nombre de la casa/inmueble', phone: 'Teléfono',
-      add: 'Añadir', save: 'Guardar', cancel: 'Cancelar', delete: 'Eliminar',
-      pay: 'Pagar', mark_paid: 'Marcar pagado', view_receipt: 'Ver recibo',
-      no_data: 'No hay datos por ahora.',
-      ai_placeholder: 'Pregúntame algo (ej: ¿cuánto debo este mes?)'
-    },
-    en: {
-      dashboard: 'Home', payments: 'Payments', damages: 'Damages', pqrs: 'Tickets',
-      chores: 'Chores', announcements: 'Announcements', expenses: 'Expenses',
-      bookings: 'Bookings', polls: 'Polls', inventory: 'Inventory',
-      messages: 'Chat', users: 'People', settings: 'Settings', logout: 'Sign out',
-      welcome: 'Welcome', login: 'Sign in', register: 'Sign up',
-      email: 'Email', password: 'Password', name: 'Full name',
-      house_name: 'House / property name', phone: 'Phone',
-      add: 'Add', save: 'Save', cancel: 'Cancel', delete: 'Delete',
-      pay: 'Pay', mark_paid: 'Mark as paid', view_receipt: 'View receipt',
-      no_data: 'No data yet.',
-      ai_placeholder: 'Ask me anything (e.g. how much do I owe?)'
-    }
-  },
-  t(k) { return this.dict[this.locale]?.[k] || k; },
-  set(loc) { this.locale = loc; localStorage.setItem('locale', loc); render(); }
-};
-const t = (k) => I18N.t(k);
-
-// ============= UI HELPERS =============
-const $ = (sel, root = document) => root.querySelector(sel);
-const el = (tag, attrs = {}, ...children) => {
+// ===================== UI helpers =====================
+const $ = (s, r=document) => r.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
   const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) {
+  for (const [k,v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
     if (k === 'class') e.className = v;
     else if (k === 'style' && typeof v === 'object') Object.assign(e.style, v);
     else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'html') e.innerHTML = v;
-    else if (v !== false && v != null) e.setAttribute(k, v);
+    else e.setAttribute(k, v);
   }
-  for (const c of children.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(c));
+  for (const c of kids.flat()) if (c != null && c !== false)
+    e.append(c.nodeType ? c : document.createTextNode(c));
   return e;
 };
-
-function toast(msg, type = '') {
-  const t = el('div', { class: `toast ${type}` }, msg);
+const toast = (msg, type='') => {
+  const t = el('div', { class:`toast ${type}` }, msg);
   $('#toast-host').append(t);
-  setTimeout(() => t.remove(), 3500);
-}
-
+  setTimeout(()=>t.remove(), 3500);
+};
 function modal(content) {
-  const back = el('div', { class: 'modal-back', onclick: (e) => { if (e.target === back) back.remove(); } });
-  const m = el('div', { class: 'modal' }, content);
+  const back = el('div', { class:'modal-back', onclick:(e)=>{ if(e.target===back) back.remove(); } });
+  const m = el('div', { class:'modal' }, content);
   back.append(m); document.body.append(back);
   return { close: () => back.remove() };
 }
 
+// ===================== Money =====================
 function fmtMoney(n, currency) {
-  const cur = (currency || state.house?.currency || 'COP').toUpperCase();
+  const cur = (currency || 'COP').toUpperCase();
   const meta = {
-    COP: { locale: 'es-CO', dec: 0 },
-    EUR: { locale: 'es-ES', dec: 2 },
-    USD: { locale: 'en-US', dec: 2 },
-    MXN: { locale: 'es-MX', dec: 2 }
-  }[cur] || { locale: 'es-CO', dec: 2 };
+    COP: { locale:'es-CO', dec:0 }, EUR: { locale:'es-ES', dec:2 },
+    USD: { locale:'en-US', dec:2 }, MXN: { locale:'es-MX', dec:2 }
+  }[cur] || { locale:'es-CO', dec:2 };
   try {
     return new Intl.NumberFormat(meta.locale, {
-      style: 'currency', currency: cur,
+      style:'currency', currency:cur,
       minimumFractionDigits: meta.dec, maximumFractionDigits: meta.dec
     }).format(Number(n) || 0);
-  } catch {
-    return cur + ' ' + (Number(n) || 0).toLocaleString(meta.locale);
-  }
+  } catch { return cur + ' ' + (Number(n)||0).toLocaleString(); }
 }
-function fmtDate(s) {
-  if (!s) return '—';
-  return new Date(s).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: '2-digit' });
-}
-function currencyOptions() {
-  const list = state.currencies?.length ? state.currencies : [
-    { code: 'COP', name: 'Peso Colombiano', symbol: '$' },
-    { code: 'EUR', name: 'Euro', symbol: '€' },
-    { code: 'USD', name: 'Dólar', symbol: 'US$' },
-    { code: 'MXN', name: 'Peso Mexicano', symbol: '$' }
-  ];
-  const houseCur = state.house?.currency || 'COP';
-  // pone la moneda de la casa primero
-  return list
-    .slice()
-    .sort((a, b) => (a.code === houseCur ? -1 : b.code === houseCur ? 1 : 0))
-    .map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.name}` }));
-}
+const fmtDate = (s) => s ? new Date(s).toLocaleDateString('es-CO',{ day:'2-digit', month:'short', year:'numeric' }) : '—';
 
-// ============= STATE =============
+// ===================== STATE =====================
 const state = {
-  view: 'dashboard',
   user: null,
-  house: null,
-  currencies: [],
+  houses: [],
+  currentHouseId: null,   // para vista detalle
+  view: 'home',           // home | detail | settings
   theme: localStorage.getItem('theme') || 'light',
+  currencies: []
 };
 
-function setTheme(theme) {
-  state.theme = theme;
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem('theme', theme);
-}
+function setTheme(t) { state.theme = t; document.documentElement.dataset.theme = t; localStorage.setItem('theme', t); }
 setTheme(state.theme);
 
-// ============= ROUTES (views) =============
-const VIEWS = {
-  dashboard:    { icon: '📊', render: viewDashboard },
-  payments:     { icon: '💰', render: viewPayments },
-  damages:      { icon: '🛠️', render: viewDamages },
-  pqrs:         { icon: '📩', render: viewPqrs },
-  chores:       { icon: '🧹', render: viewChores },
-  announcements:{ icon: '📢', render: viewAnnouncements },
-  expenses:     { icon: '🧾', render: viewExpenses },
-  bookings:     { icon: '📅', render: viewBookings },
-  polls:        { icon: '🗳️', render: viewPolls },
-  inventory:    { icon: '📦', render: viewInventory },
-  messages:     { icon: '💬', render: viewMessages },
-  users:        { icon: '👥', render: viewUsers },
-  settings:     { icon: '⚙️', render: viewSettings }
-};
-
-// ============= APP RENDER =============
+// ===================== BOOT =====================
 async function boot() {
-  // Cargar lista de monedas (público)
-  try { state.currencies = await API.get('/api/currencies'); } catch { state.currencies = []; }
-  const tk = API.token();
-  if (!tk) return render();
+  try { state.currencies = await API.get('/api/currencies'); } catch {}
+  if (!API.token()) return render();
   try {
     const { user } = await API.get('/api/auth/me');
     state.user = user;
-    if (user.theme) setTheme(user.theme);
-    if (user.locale) I18N.locale = user.locale;
-    try {
-      const { house } = await API.get('/api/houses/mine');
-      state.house = house;
-    } catch {}
-  } catch { API.setToken(null); }
+  } catch {
+    API.setToken(null);
+  }
   render();
 }
 
+// ===================== RENDER ROOT =====================
 function render() {
   const root = $('#app');
   root.innerHTML = '';
-  if (!state.user) return root.append(renderAuth());
-  root.append(renderLayout());
+  if (!state.user) { root.append(renderAuth()); return; }
+  root.append(renderApp());
 }
 
-// ============= AUTH VIEW =============
+// ===================== AUTH =====================
 function renderAuth() {
   let mode = 'login';
-  const wrap = el('div', { class: 'auth' });
-  const card = el('div', { class: 'auth-card' });
+  const wrap = el('div', { class:'auth' });
+  const card = el('div', { class:'auth-card' });
 
   function paint() {
     card.innerHTML = '';
     card.append(
       el('h1', {}, '🏡 Mi Casa'),
-      el('div', { class: 'sub' }, mode === 'login' ? 'Inicia sesión en tu casa' : 'Crea tu cuenta'),
-      el('div', { class: 'auth-tabs' },
-        el('button', { class: mode === 'login' ? 'active' : '', onclick: () => { mode='login'; paint(); } }, 'Iniciar sesión'),
-        el('button', { class: mode === 'register' ? 'active' : '', onclick: () => { mode='register'; paint(); } }, 'Registrarse')
+      el('div', { class:'sub' }, mode === 'login' ? 'Hola, ingresa a tu cuenta' : 'Crea tu cuenta'),
+      el('div', { class:'auth-tabs' },
+        el('button', { class: mode==='login' ? 'active' : '', onclick:()=>{ mode='login'; paint(); } }, 'Entrar'),
+        el('button', { class: mode==='register' ? 'active' : '', onclick:()=>{ mode='register'; paint(); } }, 'Crear cuenta')
       )
     );
 
@@ -205,33 +122,22 @@ function renderAuth() {
       const fd = Object.fromEntries(new FormData(form));
       try {
         const data = await API.post('/api/auth/' + mode, fd);
-        API.setToken(data.token); API.setUser(data.user);
+        API.setToken(data.token);
         state.user = data.user;
-        try { state.house = (await API.get('/api/houses/mine')).house; } catch {}
-        render();
         toast('¡Bienvenido!', 'success');
+        render();
       } catch (err) { toast(err.message, 'error'); }
     }});
 
     if (mode === 'register') {
-      form.append(field('full_name', t('name'), 'text', true));
-      form.append(field('house_name', t('house_name') + ' (opcional, si eres dueño)', 'text', false));
-      form.append(field('phone', t('phone'), 'tel', false));
-      // Selector de moneda
-      const curOpts = (state.currencies.length ? state.currencies : [
-        { code: 'COP', name: 'Peso Colombiano', symbol: '$' },
-        { code: 'EUR', name: 'Euro', symbol: '€' },
-        { code: 'USD', name: 'Dólar', symbol: 'US$' }
-      ]);
-      const sel = el('select', { name: 'currency' });
-      curOpts.forEach(c => sel.append(el('option', { value: c.code }, `${c.symbol} ${c.code} — ${c.name}`)));
-      form.append(el('div', { class: 'field' },
-        el('label', {}, 'Moneda principal'), sel
-      ));
+      form.append(field('full_name', 'Tu nombre completo', 'text', true));
+      form.append(field('house_name', 'Nombre de tu primera propiedad (ej: Apto 301)', 'text', false));
+      form.append(field('phone', 'Teléfono (opcional)', 'tel', false));
+      form.append(currencyField());
     }
-    form.append(field('email', t('email'), 'email', true));
-    form.append(field('password', t('password'), 'password', true));
-    form.append(el('button', { class: 'btn', style: { width: '100%', marginTop: '8px' } }, mode === 'login' ? t('login') : t('register')));
+    form.append(field('email', 'Correo electrónico', 'email', true));
+    form.append(field('password', 'Contraseña (mínimo 6)', 'password', true));
+    form.append(el('button', { class:'btn lg block', type:'submit' }, mode==='login' ? '🔓 Entrar' : '✨ Crear mi cuenta'));
 
     card.append(form);
   }
@@ -239,535 +145,567 @@ function renderAuth() {
   wrap.append(card);
   return wrap;
 }
-
-function field(name, label, type = 'text', required = false) {
-  return el('div', { class: 'field' },
+function field(name, label, type='text', required=false, value='') {
+  return el('div', { class:'field' },
     el('label', {}, label),
-    el('input', { name, type, required, autocomplete: type === 'password' ? 'current-password' : 'on' })
+    el('input', { name, type, required, value })
   );
 }
+function currencyField() {
+  const opts = state.currencies.length ? state.currencies : [
+    { code:'COP', name:'Peso Colombiano', symbol:'$' },
+    { code:'EUR', name:'Euro', symbol:'€' },
+    { code:'USD', name:'Dólar', symbol:'US$' }
+  ];
+  const sel = el('select', { name:'currency' });
+  opts.forEach(c => sel.append(el('option', { value:c.code }, `${c.symbol} ${c.code} — ${c.name}`)));
+  return el('div', { class:'field' }, el('label', {}, 'Moneda principal'), sel);
+}
 
-// ============= LAYOUT =============
-function renderLayout() {
-  const wrap = el('div', { class: 'layout' });
+// ===================== APP SHELL =====================
+function renderApp() {
+  const layout = el('div', { class:'layout' });
 
-  const navItems = Object.entries(VIEWS).map(([k, v]) =>
-    el('button', {
-      class: state.view === k ? 'active' : '',
-      onclick: () => { state.view = k; render(); }
-    }, el('span', { class: 'nav-icon' }, v.icon), t(k))
-  );
-
-  const sidebar = el('aside', { class: 'sidebar' },
-    el('div', { class: 'brand' }, el('span', { class: 'brand-icon' }, '🏡'), 'Mi Casa'),
-    el('nav', { class: 'nav' }, ...navItems),
-    el('div', { class: 'sidebar-footer' },
-      el('div', { style: { padding: '8px 10px', fontSize: '13px', color: 'var(--text-muted)' } },
-        '👤 ', state.user.full_name, el('br'),
-        el('span', { style: { fontSize: '11px' } }, state.user.role.toUpperCase())
-      ),
-      el('button', { class: 'btn ghost', style: { width: '100%' }, onclick: logout }, t('logout'))
+  // Sidebar (desktop)
+  const sidebar = el('aside', { class:'sidebar' },
+    el('div', { class:'brand' }, el('span', { class:'brand-icon' }, '🏡'), 'Mi Casa'),
+    el('nav', { class:'nav' },
+      navBtn('home',     '🏠', state.user.role === 'tenant' ? 'Mi Apartamento' : 'Mis Propiedades'),
+      navBtn('payments', '💰', 'Pagos'),
+      navBtn('damages',  '🛠️', 'Daños'),
+      navBtn('messages', '💬', 'Avisos'),
+      navBtn('settings', '⚙️', 'Ajustes')
+    ),
+    el('div', { class:'sidebar-footer' },
+      el('button', { class:'nav-btn', onclick: logout }, el('span',{ class:'nav-icon'},'🚪'), 'Cerrar sesión')
     )
   );
 
   // Mobile header
-  const mobileHeader = el('header', { class: 'mobile-header' },
-    el('div', { style: { fontWeight: '800' } }, '🏡 ', t(state.view)),
-    el('button', { class: 'btn icon ghost', onclick: openSettings }, '⚙️')
+  const mobHeader = el('header', { class:'mobile-header' },
+    el('div', { class:'brand' }, el('span', { class:'brand-icon' }, '🏡'), 'Mi Casa'),
+    el('button', { class:'icon-btn', onclick:()=> setTheme(state.theme === 'dark' ? 'light' : 'dark') },
+      state.theme === 'dark' ? '☀️' : '🌙')
   );
 
-  // Mobile bottom bar (5 principales)
-  const mobileItems = ['dashboard','payments','chores','announcements','settings'];
-  const mobileBar = el('nav', { class: 'mobile-bar' },
-    ...mobileItems.map(k => el('button', {
-      class: state.view === k ? 'active' : '',
-      onclick: () => { state.view = k; render(); }
-    }, el('span', { class: 'nav-icon' }, VIEWS[k].icon), t(k)))
+  // Main
+  const main = el('main', { class:'main' });
+  main.append(mobHeader);
+  renderView(main);
+
+  // Bottom nav (mobile)
+  const bottom = el('nav', { class:'bottom-nav' },
+    bottomBtn('home', '🏠', 'Inicio'),
+    bottomBtn('payments', '💰', 'Pagos'),
+    bottomBtn('damages', '🛠️', 'Daños'),
+    bottomBtn('messages', '💬', 'Avisos'),
+    bottomBtn('settings', '⚙️', 'Ajustes')
   );
 
-  const main = el('main', { class: 'main' });
-  main.append(mobileHeader);
-  const topbar = el('div', { class: 'topbar' },
-    el('h2', {}, t(state.view)),
-    el('div', { class: 'topbar-actions' },
-      el('button', { class: 'btn icon ghost', onclick: () => setTheme(state.theme === 'dark' ? 'light' : 'dark') },
-        state.theme === 'dark' ? '☀️' : '🌙')
-    )
-  );
-  main.append(topbar);
+  // FAB IA
+  const fab = el('button', { class:'fab', title:'Asistente', onclick: openAI }, '🤖');
 
-  const container = el('div');
-  main.append(container);
-
-  // AI fab
-  main.append(el('button', { class: 'ai-fab', onclick: openAi, title: 'Asistente IA' }, '🤖'));
-
-  Promise.resolve(VIEWS[state.view].render(container)).catch(err => {
-    container.append(el('div', { class: 'empty' }, '⚠️ ', err.message));
-  });
-
-  wrap.append(sidebar, main, mobileBar);
-  return wrap;
+  layout.append(sidebar, main, bottom, fab);
+  return layout;
+}
+function navBtn(view, icon, label) {
+  return el('button', {
+    class: 'nav-btn ' + (state.view === view ? 'active' : ''),
+    onclick: () => { state.view = view; state.currentHouseId = null; render(); }
+  }, el('span', { class:'nav-icon' }, icon), label);
+}
+function bottomBtn(view, icon, label) {
+  return el('button', {
+    class: state.view === view ? 'active' : '',
+    onclick: () => { state.view = view; state.currentHouseId = null; render(); }
+  }, el('span', { class:'icon' }, icon), label);
 }
 
-function logout() { API.setToken(null); API.setUser(null); state.user = null; render(); }
+function logout() { API.setToken(null); state.user = null; render(); }
 
-// ============= VIEW: DASHBOARD =============
-async function viewDashboard(c) {
-  c.append(el('div', { class: 'kpi-grid', id: 'kpis' }, skeleton(4)));
-  const data = await API.get('/api/dashboard');
-  const k = data.kpis;
-  const cur = data.currency;
-  $('#kpis', c).replaceWith(el('div', { class: 'kpi-grid' },
-    kpiCard('Ingresos año', fmtMoney(k.income_year, cur), 'success'),
-    kpiCard('Mora total', fmtMoney(k.overdue_amount, cur), 'danger', `${k.overdue_count} pagos vencidos`),
-    kpiCard('Gastos mes', fmtMoney(k.expenses_month, cur), 'warning'),
-    kpiCard('Ocupantes', k.occupants, ''),
-    kpiCard('Daños activos', k.active_damages, k.active_damages > 0 ? 'warning' : ''),
-    kpiCard('Turnos pendientes', k.pending_chores, '')
-  ));
-
-  // Gráfica
-  const chartCard = el('div', { class: 'card', style: { marginTop: '20px' } },
-    el('h3', { class: 'card-title' }, 'Ingresos vs Gastos (12 meses)'),
-    el('canvas', { id: 'chart-monthly', height: 80 })
-  );
-  c.append(chartCard);
-  const ctx = $('#chart-monthly', c).getContext('2d');
-  if (window.Chart) new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: data.monthly.map(m => m.month),
-      datasets: [
-        { label: 'Ingresos', data: data.monthly.map(m => m.income),  backgroundColor: '#16a34a' },
-        { label: 'Gastos',   data: data.monthly.map(m => m.expense), backgroundColor: '#f59e0b' }
-      ]
-    },
-    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
-  });
-}
-
-function kpiCard(label, value, type = '', delta = '') {
-  return el('div', { class: 'kpi ' + type },
-    el('div', { class: 'label' }, label),
-    el('div', { class: 'value' }, String(value)),
-    delta && el('div', { class: 'delta', style: { color: 'var(--text-muted)' } }, delta)
-  );
-}
-
-function skeleton(n) { return Array.from({ length: n }, () => el('div', { class: 'kpi' }, el('div', { class: 'skel', style: { width: '60%' } }), el('div', { class: 'skel', style: { width: '80%', height: '24px', marginTop: '10px' } }))); }
-
-// ============= VIEW: PAYMENTS =============
-async function viewPayments(c) {
-  if (state.user.role !== 'tenant') {
-    c.append(el('button', { class: 'btn', onclick: openCreatePayment }, '+ Generar cobro'));
+// ===================== ROUTER =====================
+function renderView(c) {
+  if (state.currentHouseId) return viewHouseDetail(c);
+  switch (state.view) {
+    case 'home':     return state.user.role === 'tenant' ? viewTenantHome(c) : viewProperties(c);
+    case 'payments': return viewAllPayments(c);
+    case 'damages':  return viewAllDamages(c);
+    case 'messages': return viewAnnouncements(c);
+    case 'settings': return viewSettings(c);
+    default: return viewProperties(c);
   }
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  c.append(list);
-  const { payments } = await API.get('/api/payments');
-  if (!payments.length) return list.append(emptyState('💰', 'No hay pagos registrados'));
-  payments.forEach(p => {
-    const status = p.status === 'paid' ? 'paid' : (p.status === 'overdue' ? 'overdue' : 'pending');
-    const item = el('div', { class: 'list-item' },
-      el('div', {},
-        el('div', { style: { fontWeight: 600 } }, `Arriendo ${p.period_month}/${p.period_year} — ${p.tenant_name || ''}`),
-        el('div', { class: 'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`)
-      ),
-      el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-        el('span', { class: 'badge ' + status }, p.status),
-        p.status !== 'paid' && state.user.role === 'tenant' && el('button', { class: 'btn sm', onclick: () => payOnline(p) }, '💳 Pagar'),
-        p.status !== 'paid' && state.user.role !== 'tenant' && el('button', { class: 'btn sm success', onclick: () => markPaid(p) }, '✓ Pagado'),
-        p.status === 'paid' && el('a', { class: 'btn sm ghost', href: `/api/payments/${p.id}/receipt.pdf`, target: '_blank' }, '📄 PDF')
-      )
-    );
-    list.append(item);
-  });
 }
 
-function openCreatePayment() {
+// ===================== VIEW: PROPIEDADES (DUEÑO HOME) =====================
+async function viewProperties(c) {
+  c.append(el('div', { class:'topbar' },
+    el('h1', {}, '🏠 Mis Propiedades'),
+    el('div', { class:'topbar-actions' },
+      el('button', { class:'icon-btn', onclick:()=> setTheme(state.theme==='dark'?'light':'dark') },
+        state.theme==='dark'?'☀️':'🌙')
+    )
+  ));
+
+  const grid = el('div', { class:'props-grid' });
+  c.append(grid);
+  grid.append(el('div', { class:'empty' }, el('div', { class:'spinner' })));
+
+  try {
+    const { houses } = await API.get('/api/houses');
+    state.houses = houses;
+    grid.innerHTML = '';
+
+    houses.forEach(h => grid.append(renderPropCard(h)));
+    grid.append(el('button', { class:'prop-add', onclick: openAddProperty },
+      el('span', { class:'plus' }, '+'),
+      el('span', {}, 'Añadir apartamento')
+    ));
+  } catch (e) {
+    grid.innerHTML = '';
+    grid.append(el('div', { class:'empty' }, el('div', { class:'icon' }, '⚠️'),
+      el('div', { class:'msg' }, e.message)));
+  }
+}
+
+function renderPropCard(h) {
+  const tenant = (h.tenants && h.tenants[0]) || null;
+  const status = h.status || (tenant ? 'occupied' : 'available');
+  const statusLabel = { occupied:'🟢 Ocupado', available:'🔵 Disponible', maintenance:'🟠 En mantenimiento' }[status] || status;
+
+  const alerts = [];
+  if (h.overdue_count > 0)
+    alerts.push(el('span', { class:'prop-alert danger' }, `⚠️ ${h.overdue_count} pago${h.overdue_count>1?'s':''} en mora · ${fmtMoney(h.overdue_amount, h.currency)}`));
+  if (h.damages_count > 0)
+    alerts.push(el('span', { class:'prop-alert warning' }, `🛠️ ${h.damages_count} daño${h.damages_count>1?'s':''} pendiente${h.damages_count>1?'s':''}`));
+  if (h.income_month > 0)
+    alerts.push(el('span', { class:'prop-alert success' }, `💰 ${fmtMoney(h.income_month, h.currency)} este mes`));
+  if (alerts.length === 0)
+    alerts.push(el('span', { class:'prop-alert success' }, '✅ Todo al día'));
+
+  return el('div', { class:'prop-card', onclick: () => openHouse(h.id) },
+    el('div', { class:'prop-head' },
+      el('div', { class:'prop-emoji' }, '🏠'),
+      el('div', { style:{ flex:1 } },
+        el('h3', { class:'prop-name' }, h.name),
+        h.address && el('div', { class:'prop-addr' }, '📍 ' + h.address)
+      ),
+      el('span', { class:'prop-status ' + status }, statusLabel)
+    ),
+    tenant
+      ? el('div', { class:'prop-tenant' },
+          el('b', {}, '👤 ' + tenant.name),
+          el('small', {}, tenant.email + (tenant.phone ? ' · ' + tenant.phone : '')))
+      : el('div', { class:'prop-tenant' },
+          el('b', {}, 'Sin inquilino'),
+          el('small', {}, 'Toca para añadir uno')),
+    el('div', { class:'prop-alerts' }, alerts)
+  );
+}
+
+function openHouse(id) { state.currentHouseId = id; render(); }
+
+// ===================== AGREGAR PROPIEDAD =====================
+function openAddProperty() {
   const m = modal(el('div', {},
-    el('h3', {}, 'Generar cobro de arriendo'),
-    formBuilder([
-      { name: 'tenant_id', label: 'ID inquilino', type: 'text', required: true },
-      { name: 'contract_id', label: 'ID contrato', type: 'text', required: true },
-      { name: 'period_month', label: 'Mes', type: 'number', required: true },
-      { name: 'period_year', label: 'Año', type: 'number', required: true },
-      { name: 'amount', label: 'Monto', type: 'number', required: true },
-      { name: 'currency', label: 'Moneda', type: 'select', options: currencyOptions(), required: true },
-      { name: 'due_date', label: 'Vencimiento', type: 'date', required: true }
-    ], async (data) => {
-      await API.post('/api/payments', data);
-      m.close(); render(); toast('Cobro creado', 'success');
-    })
+    el('h3', {}, '🏠 Nueva propiedad'),
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        if (data.monthly_rent) data.monthly_rent = Number(data.monthly_rent);
+        try {
+          await API.post('/api/houses', data);
+          m.close(); toast('Propiedad añadida ✅', 'success'); render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('name', 'Nombre (ej: Apto 301, Casa Centro)', 'text', true),
+        field('address', 'Dirección', 'text'),
+        field('city', 'Ciudad', 'text'),
+        field('monthly_rent', 'Arriendo mensual', 'number'),
+        currencyField(),
+        el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar propiedad')
+      );
+      return f;
+    })()
   ));
 }
 
-async function payOnline(p) {
+// ===================== VISTA DETALLE DE UN INMUEBLE =====================
+async function viewHouseDetail(c) {
+  const id = state.currentHouseId;
+  const h = state.houses.find(x => x.id === id);
+  const cur = h?.currency || 'COP';
+
+  c.append(el('div', { class:'topbar' },
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' } },
+      el('button', { class:'icon-btn', onclick: () => { state.currentHouseId = null; render(); } }, '←'),
+      el('h1', {}, h ? '🏠 ' + h.name : 'Cargando…')
+    ),
+    el('div', { class:'topbar-actions' },
+      el('button', { class:'btn ghost sm', onclick: () => editHouse(h) }, '✏️ Editar')
+    )
+  ));
+
+  if (!h) return;
+
+  // KPIs de esta propiedad
+  c.append(el('div', { class:'kpi-row' },
+    kpi('Ingresos del mes', fmtMoney(h.income_month, cur), 'success'),
+    kpi('Mora total', fmtMoney(h.overdue_amount, cur), h.overdue_amount > 0 ? 'danger' : ''),
+    kpi('Daños pendientes', h.damages_count, h.damages_count > 0 ? 'warning' : ''),
+    kpi('Inquilinos', (h.tenants || []).length, '')
+  ));
+
+  // Inquilino(s)
+  const sec1 = el('div', { class:'detail-section' },
+    el('h3', {}, '👤 Inquilino', el('button', {
+      class:'btn sm', style:{ marginLeft:'auto' },
+      onclick: () => openInviteTenant(h.id)
+    }, '+ Añadir'))
+  );
+  if (!h.tenants || h.tenants.length === 0) {
+    sec1.append(emptyState('🪑', 'Sin inquilino actual'));
+  } else {
+    const list = el('div', { class:'list' });
+    h.tenants.forEach(t => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, '👤 ' + t.name),
+        el('div', { class:'meta' }, t.email + (t.phone ? ' · ' + t.phone : ''))
+      )
+    )));
+    sec1.append(list);
+  }
+  c.append(sec1);
+
+  // Pagos
+  const sec2 = el('div', { class:'detail-section' },
+    el('h3', {}, '💰 Pagos', el('button', {
+      class:'btn sm', style:{ marginLeft:'auto' },
+      onclick: () => openCreatePayment(h)
+    }, '+ Cobro'))
+  );
+  c.append(sec2);
+  loadPayments(sec2, h);
+
+  // Daños
+  const sec3 = el('div', { class:'detail-section' },
+    el('h3', {}, '🛠️ Daños reportados')
+  );
+  c.append(sec3);
+  loadDamages(sec3, h);
+}
+
+function kpi(label, value, type='') {
+  return el('div', { class:'kpi ' + type },
+    el('div', { class:'label' }, label),
+    el('div', { class:'value' }, String(value))
+  );
+}
+function emptyState(icon, msg) {
+  return el('div', { class:'empty' },
+    el('div', { class:'icon' }, icon),
+    el('div', { class:'msg' }, msg)
+  );
+}
+
+async function loadPayments(container, house) {
   try {
-    const { checkout_url } = await API.post(`/api/payments/${p.id}/checkout`);
-    window.open(checkout_url, '_blank');
+    const { payments } = await API.get('/api/payments');
+    const list = el('div', { class:'list' });
+    const filtered = payments.filter(p => p.house_id === house.id);
+    if (!filtered.length) { container.append(emptyState('💰', 'Sin cobros aún')); return; }
+    filtered.forEach(p => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, `${p.period_month}/${p.period_year} — ${p.tenant_name || ''}`),
+        el('div', { class:'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`)
+      ),
+      el('div', { class:'list-actions' },
+        el('span', { class:'badge ' + p.status }, p.status),
+        p.status !== 'paid' && state.user.role !== 'tenant' &&
+          el('button', { class:'btn sm success', onclick:()=> markPaid(p) }, '✓ Pagado'),
+        p.status === 'paid' &&
+          el('a', { class:'btn sm ghost', href:`/api/payments/${p.id}/receipt.pdf`, target:'_blank' }, '📄 PDF')
+      )
+    )));
+    container.append(list);
+  } catch (e) { container.append(emptyState('⚠️', e.message)); }
+}
+
+async function loadDamages(container, house) {
+  try {
+    const { damages } = await API.get('/api/damages');
+    const filtered = (damages || []).filter(d => d.house_id === house.id);
+    if (!filtered.length) { container.append(emptyState('✅', 'Sin daños reportados')); return; }
+    const list = el('div', { class:'list' });
+    filtered.forEach(d => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, '🛠️ ' + d.title),
+        el('div', { class:'meta' }, `${d.location || '—'} · ${fmtDate(d.created_at)}`)
+      ),
+      el('div', { class:'list-actions' },
+        el('span', { class:'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status)
+      )
+    )));
+    container.append(list);
+  } catch (e) { container.append(emptyState('⚠️', e.message)); }
+}
+
+// ===================== INVITAR INQUILINO =====================
+function openInviteTenant(houseId) {
+  const m = modal(el('div', {},
+    el('h3', {}, '👤 Añadir inquilino'),
+    el('p', { style:{ color:'var(--text-muted)', marginBottom:'16px' } }, 'Le crearemos una cuenta. Comparte estos datos con tu inquilino.'),
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        try {
+          const r = await API.post(`/api/houses/${houseId}/invite-tenant`, data);
+          m.close();
+          toast('Inquilino añadido ✅', 'success');
+          alert(`Comparte estos datos con tu inquilino:\n\nCorreo: ${r.login.email}\nContraseña: ${r.login.password}`);
+          render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('full_name', 'Nombre completo', 'text', true),
+        field('email', 'Correo del inquilino', 'email', true),
+        field('phone', 'Teléfono', 'tel'),
+        field('password', 'Contraseña que tendrá (mín 6)', 'text', true),
+        el('button', { class:'btn lg block', type:'submit' }, '✅ Crear cuenta del inquilino')
+      );
+      return f;
+    })()
+  ));
+}
+
+// ===================== EDITAR PROPIEDAD =====================
+function editHouse(h) {
+  const m = modal(el('div', {},
+    el('h3', {}, '✏️ Editar propiedad'),
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        if (data.monthly_rent) data.monthly_rent = Number(data.monthly_rent);
+        try {
+          await API.patch(`/api/houses/${h.id}`, data);
+          m.close(); toast('Guardado ✅', 'success');
+          state.currentHouseId = null; render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('name', 'Nombre', 'text', true, h.name),
+        field('address', 'Dirección', 'text', false, h.address || ''),
+        field('city', 'Ciudad', 'text', false, h.city || ''),
+        field('monthly_rent', 'Arriendo mensual', 'number', false, h.monthly_rent || ''),
+        el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar'),
+        el('button', { class:'btn ghost block', type:'button', style:{ marginTop:'8px' }, onclick: async () => {
+          if (!confirm('¿Archivar esta propiedad?')) return;
+          await API.del(`/api/houses/${h.id}`);
+          m.close(); state.currentHouseId = null; render();
+          toast('Propiedad archivada', 'success');
+        }}, '🗑️ Archivar')
+      );
+      return f;
+    })()
+  ));
+}
+
+// ===================== CREAR COBRO =====================
+function openCreatePayment(house) {
+  const tenant = (house.tenants || [])[0];
+  if (!tenant) return toast('Primero añade un inquilino', 'error');
+
+  const m = modal(el('div', {},
+    el('h3', {}, '💰 Nuevo cobro'),
+    el('p', { style:{ color:'var(--text-muted)', marginBottom:'16px' } }, `Cobro para ${tenant.name}`),
+    (() => {
+      const now = new Date();
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        data.amount = Number(data.amount);
+        data.period_month = Number(data.period_month);
+        data.period_year = Number(data.period_year);
+        data.tenant_id = tenant.id;
+        data.contract_id = tenant.id; // simplificado
+        try {
+          await API.post('/api/payments', data);
+          m.close(); toast('Cobro creado ✅', 'success');
+          state.currentHouseId = null; render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('amount', 'Monto', 'number', true, house.monthly_rent || ''),
+        field('period_month', 'Mes', 'number', true, now.getMonth() + 1),
+        field('period_year', 'Año', 'number', true, now.getFullYear()),
+        field('due_date', 'Fecha de vencimiento', 'date', true,
+          new Date(now.getFullYear(), now.getMonth(), 5).toISOString().slice(0,10)),
+        el('button', { class:'btn lg block', type:'submit' }, '💾 Crear cobro')
+      );
+      return f;
+    })()
+  ));
+}
+
+async function markPaid(p) {
+  if (!confirm('¿Marcar este pago como recibido?')) return;
+  try {
+    await API.patch(`/api/payments/${p.id}/pay`, { method:'transfer', amount_paid: p.amount });
+    toast('Pago registrado ✅', 'success');
+    state.currentHouseId = null; render();
   } catch (e) { toast(e.message, 'error'); }
 }
-async function markPaid(p) {
-  const ref = prompt('Referencia/comprobante (opcional):') || '';
-  await API.patch(`/api/payments/${p.id}/pay`, { method: 'transfer', amount_paid: p.amount, reference: ref });
-  toast('Pago registrado', 'success'); render();
+
+// ===================== VISTA INQUILINO =====================
+async function viewTenantHome(c) {
+  c.append(el('div', { class:'topbar' }, el('h1', {}, '🏠 Mi Apartamento')));
+  try {
+    const { houses } = await API.get('/api/houses');
+    if (!houses.length) return c.append(emptyState('🏠', 'No tienes apartamento asignado'));
+    state.houses = houses;
+    state.currentHouseId = houses[0].id;
+    render();
+  } catch (e) { c.append(emptyState('⚠️', e.message)); }
 }
 
-// ============= VIEW: DAMAGES =============
-async function viewDamages(c) {
-  c.append(el('button', { class: 'btn', onclick: () => crudModal('Reportar daño', '/api/damages', [
-    { name: 'title', label: 'Título', required: true },
-    { name: 'description', label: 'Descripción', type: 'textarea', required: true },
-    { name: 'location', label: 'Ubicación' },
-    { name: 'priority', label: 'Prioridad', type: 'select', options: ['low','medium','high','urgent'] },
-    { name: 'estimated_cost', label: 'Costo estimado', type: 'number' }
-  ]) }, '+ Reportar daño'));
-  const { damages } = await API.get('/api/damages');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!damages.length) list.append(emptyState('🛠️', 'Sin daños reportados'));
-  damages.forEach(d => list.append(el('div', { class: 'list-item' },
-    el('div', {},
-      el('div', { style: { fontWeight: 600 } }, d.title),
-      el('div', { class: 'meta' }, `${d.location || '—'} · Reportado por ${d.reporter_name} · ${fmtDate(d.created_at)}`)
-    ),
-    el('div', { style: { display: 'flex', gap: '8px' } },
-      el('span', { class: 'badge ' + d.priority }, d.priority),
-      el('span', { class: 'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status)
-    )
-  )));
-  c.append(list);
+// ===================== VISTAS GLOBALES (todos los pagos / daños) =====================
+async function viewAllPayments(c) {
+  c.append(el('div', { class:'topbar' }, el('h1', {}, '💰 Todos los pagos')));
+  const sec = el('div', { class:'detail-section' });
+  c.append(sec);
+  try {
+    const { payments } = await API.get('/api/payments');
+    if (!payments.length) return sec.append(emptyState('💰', 'Sin pagos'));
+    const list = el('div', { class:'list' });
+    payments.forEach(p => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, `${p.period_month}/${p.period_year} — ${p.tenant_name || ''}`),
+        el('div', { class:'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`)
+      ),
+      el('div', { class:'list-actions' },
+        el('span', { class:'badge ' + p.status }, p.status),
+        p.status !== 'paid' && state.user.role !== 'tenant' &&
+          el('button', { class:'btn sm success', onclick:()=> markPaid(p) }, '✓ Pagado')
+      )
+    )));
+    sec.append(list);
+  } catch (e) { sec.append(emptyState('⚠️', e.message)); }
 }
 
-// ============= VIEW: PQRS =============
-async function viewPqrs(c) {
-  c.append(el('button', { class: 'btn', onclick: () => crudModal('Nueva PQRS', '/api/pqrs', [
-    { name: 'type', label: 'Tipo', type: 'select', options: ['peticion','queja','reclamo','sugerencia','felicitacion'] },
-    { name: 'subject', label: 'Asunto', required: true },
-    { name: 'body', label: 'Detalle', type: 'textarea', required: true },
-    { name: 'is_anonymous', label: 'Anónimo', type: 'checkbox' }
-  ]) }, '+ Nueva PQRS'));
-  const { pqrs } = await API.get('/api/pqrs');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!pqrs.length) list.append(emptyState('📩', 'Sin PQRS'));
-  pqrs.forEach(p => list.append(el('div', { class: 'list-item' },
-    el('div', {},
-      el('div', { style: { fontWeight: 600 } }, p.subject),
-      el('div', { class: 'meta' }, `${p.type} · ${p.author_name} · ${fmtDate(p.created_at)}`)
-    ),
-    el('span', { class: 'badge ' + (p.status === 'answered' ? 'paid' : 'pending') }, p.status)
-  )));
-  c.append(list);
+async function viewAllDamages(c) {
+  c.append(el('div', { class:'topbar' },
+    el('h1', {}, '🛠️ Daños'),
+    el('button', { class:'btn', onclick: openReportDamage }, '+ Reportar daño')
+  ));
+  const sec = el('div', { class:'detail-section' });
+  c.append(sec);
+  try {
+    const { damages } = await API.get('/api/damages');
+    if (!damages || !damages.length) return sec.append(emptyState('✅', 'Sin daños reportados'));
+    const list = el('div', { class:'list' });
+    damages.forEach(d => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, '🛠️ ' + d.title),
+        el('div', { class:'meta' }, `${d.location || '—'} · ${fmtDate(d.created_at)}`)
+      ),
+      el('span', { class:'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status)
+    )));
+    sec.append(list);
+  } catch (e) { sec.append(emptyState('⚠️', e.message)); }
 }
 
-// ============= VIEW: CHORES =============
-async function viewChores(c) {
-  c.append(el('button', { class: 'btn', onclick: () => crudModal('Nuevo turno', '/api/chores', [
-    { name: 'type', label: 'Tipo', type: 'select', options: ['cleaning','trash','gas_purchase','cooking','laundry','other'] },
-    { name: 'title', label: 'Título', required: true },
-    { name: 'description', label: 'Descripción', type: 'textarea' },
-    { name: 'due_date', label: 'Fecha', type: 'date', required: true }
-  ]) }, '+ Asignar turno'));
-  const { chores } = await API.get('/api/chores');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!chores.length) list.append(emptyState('🧹', 'Sin turnos'));
-  chores.forEach(ch => list.append(el('div', { class: 'list-item' },
-    el('div', {},
-      el('div', { style: { fontWeight: 600 } }, ch.title),
-      el('div', { class: 'meta' }, `${ch.assignee_name || 'Sin asignar'} · ${fmtDate(ch.due_date)}`)
-    ),
-    ch.status === 'pending' ?
-      el('button', { class: 'btn sm success', onclick: async () => { await API.patch(`/api/chores/${ch.id}/complete`); render(); } }, '✓ Hecho') :
-      el('span', { class: 'badge paid' }, 'Hecho')
-  )));
-  c.append(list);
+function openReportDamage() {
+  const m = modal(el('div', {},
+    el('h3', {}, '🛠️ Reportar daño'),
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        try {
+          await API.post('/api/damages', data);
+          m.close(); toast('Daño reportado ✅', 'success'); render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('title', 'Título (ej: Fuga en baño)', 'text', true),
+        field('location', 'Ubicación (ej: cocina)', 'text'),
+        el('div', { class:'field' },
+          el('label', {}, 'Descripción'),
+          el('textarea', { name:'description', rows:4, placeholder:'Cuéntanos qué pasó...' })
+        ),
+        el('button', { class:'btn lg block', type:'submit' }, '📤 Enviar reporte')
+      );
+      return f;
+    })()
+  ));
 }
 
-// ============= VIEW: ANNOUNCEMENTS =============
+// ===================== AVISOS =====================
 async function viewAnnouncements(c) {
-  c.append(el('button', { class: 'btn', onclick: () => crudModal('Nuevo anuncio', '/api/announcements', [
-    { name: 'title', label: 'Título', required: true },
-    { name: 'body', label: 'Contenido', type: 'textarea', required: true },
-    { name: 'pinned', label: 'Fijar', type: 'checkbox' }
-  ]) }, '+ Anuncio'));
-  const { announcements } = await API.get('/api/announcements');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!announcements.length) list.append(emptyState('📢', 'Sin anuncios'));
-  announcements.forEach(a => list.append(el('div', { class: 'card', style: { marginBottom: '10px' } },
-    a.pinned && el('span', { class: 'badge', style: { background: 'rgba(245,158,11,.15)', color: 'var(--warning)' } }, '📌 Fijado'),
-    el('h4', { style: { margin: '6px 0' } }, a.title),
-    el('div', { class: 'meta', style: { color: 'var(--text-muted)', fontSize: '13px' } }, `${a.author_name} · ${fmtDate(a.created_at)}`),
-    el('p', { style: { whiteSpace: 'pre-wrap' } }, a.body),
-    el('div', { style: { display: 'flex', gap: '12px' } },
-      el('button', { class: 'btn sm ghost', onclick: async () => {
-        a.liked ? await API.del(`/api/announcements/${a.id}/like`) : await API.post(`/api/announcements/${a.id}/like`);
-        render();
-      } }, `${a.liked ? '❤️' : '🤍'} ${a.likes || 0}`),
-      el('span', { style: { color: 'var(--text-muted)', fontSize: '13px', alignSelf: 'center' } }, `💬 ${a.comments || 0}`)
-    )
-  )));
-  c.append(list);
-}
-
-// ============= VIEW: EXPENSES =============
-async function viewExpenses(c) {
-  c.append(el('button', { class: 'btn', onclick: () => crudModal('Nuevo gasto', '/api/expenses', [
-    { name: 'title', label: 'Título', required: true },
-    { name: 'amount', label: 'Monto', type: 'number', required: true },
-    { name: 'currency', label: 'Moneda', type: 'select', options: currencyOptions(), required: true },
-    { name: 'category', label: 'Categoría' },
-    { name: 'expense_date', label: 'Fecha', type: 'date' }
-  ]) }, '+ Gasto'));
-  const { expenses } = await API.get('/api/expenses');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!expenses.length) list.append(emptyState('🧾', 'Sin gastos'));
-  expenses.forEach(e => list.append(el('div', { class: 'list-item' },
-    el('div', {},
-      el('div', { style: { fontWeight: 600 } }, e.title),
-      el('div', { class: 'meta' }, `${e.payer_name} · ${e.category || ''} · ${fmtDate(e.expense_date)}`)
-    ),
-    el('div', { style: { fontWeight: 700 } }, fmtMoney(e.amount, e.currency))
-  )));
-  c.append(list);
-}
-
-// ============= VIEW: BOOKINGS =============
-async function viewBookings(c) {
-  const { areas } = await API.get('/api/bookings/areas');
-  c.append(
-    el('div', { style: { display: 'flex', gap: '8px', marginBottom: '14px' } },
-      el('button', { class: 'btn', onclick: () => crudModal('Reservar', '/api/bookings', [
-        { name: 'area_id', label: 'Área', type: 'select', options: areas.map(a => ({ value: a.id, label: a.name })) },
-        { name: 'start_at', label: 'Inicio', type: 'datetime-local', required: true },
-        { name: 'end_at', label: 'Fin', type: 'datetime-local', required: true },
-        { name: 'notes', label: 'Notas' }
-      ]) }, '+ Reserva'),
-      state.user.role !== 'tenant' && el('button', { class: 'btn ghost', onclick: () => crudModal('Nueva área común', '/api/bookings/areas', [
-        { name: 'name', label: 'Nombre', required: true },
-        { name: 'description', label: 'Descripción' },
-        { name: 'capacity', label: 'Capacidad', type: 'number' }
-      ]) }, '+ Área común')
-    )
-  );
-  const { bookings } = await API.get('/api/bookings');
-  const list = el('div', { class: 'list' });
-  if (!bookings.length) list.append(emptyState('📅', 'Sin reservas'));
-  bookings.forEach(b => list.append(el('div', { class: 'list-item' },
-    el('div', {},
-      el('div', { style: { fontWeight: 600 } }, `${b.area_name} — ${b.user_name}`),
-      el('div', { class: 'meta' }, `${fmtDate(b.start_at)} → ${fmtDate(b.end_at)}`)
-    ),
-    el('span', { class: 'badge ' + (b.status === 'confirmed' ? 'paid' : 'pending') }, b.status)
-  )));
-  c.append(list);
-}
-
-// ============= VIEW: POLLS =============
-async function viewPolls(c) {
-  c.append(el('button', { class: 'btn', onclick: () => {
-    const m = modal(el('div', {},
-      el('h3', {}, 'Nueva votación'),
-      formBuilder([
-        { name: 'question', label: 'Pregunta', required: true },
-        { name: 'description', label: 'Descripción', type: 'textarea' },
-        { name: 'options', label: 'Opciones (separadas por coma)', required: true },
-        { name: 'is_anonymous', label: 'Anónima', type: 'checkbox' }
-      ], async (data) => {
-        data.options = data.options.split(',').map(s => s.trim()).filter(Boolean);
-        await API.post('/api/polls', data); m.close(); render(); toast('Creada', 'success');
-      })
-    ));
-  } }, '+ Votación'));
-  const { polls } = await API.get('/api/polls');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!polls.length) list.append(emptyState('🗳️', 'Sin votaciones'));
-  polls.forEach(p => {
-    const total = p.options?.reduce((s, o) => s + Number(o.votes), 0) || 0;
-    list.append(el('div', { class: 'card' },
-      el('h4', {}, p.question),
-      p.description && el('div', { class: 'meta' }, p.description),
-      el('div', { style: { marginTop: '12px' } },
-        ...(p.options || []).map(o => {
-          const pct = total ? Math.round((o.votes / total) * 100) : 0;
-          return el('div', { style: { marginBottom: '8px', cursor: 'pointer' }, onclick: async () => {
-            if (p.status === 'open') { await API.post(`/api/polls/${p.id}/vote`, { option_id: o.id }); render(); }
-          } },
-            el('div', { style: { display: 'flex', justifyContent: 'space-between' } },
-              el('span', {}, (p.my_vote === o.id ? '✓ ' : '') + o.label),
-              el('span', { style: { color: 'var(--text-muted)' } }, `${o.votes} (${pct}%)`)
-            ),
-            el('div', { style: { background: 'var(--surface-2)', height: '6px', borderRadius: '3px', overflow: 'hidden', marginTop: '4px' } },
-              el('div', { style: { width: pct + '%', height: '100%', background: 'var(--primary)' } })
-            )
-          );
-        })
+  c.append(el('div', { class:'topbar' }, el('h1', {}, '💬 Avisos')));
+  const sec = el('div', { class:'detail-section' });
+  c.append(sec);
+  try {
+    const { announcements } = await API.get('/api/announcements');
+    if (!announcements || !announcements.length) return sec.append(emptyState('📭', 'Sin avisos'));
+    const list = el('div', { class:'list' });
+    announcements.forEach(a => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, a.title),
+        el('div', { class:'meta' }, (a.author_name || '') + ' · ' + fmtDate(a.created_at))
       )
-    ));
-  });
-  c.append(list);
+    )));
+    sec.append(list);
+  } catch (e) { sec.append(emptyState('⚠️', e.message)); }
 }
 
-// ============= VIEW: INVENTORY =============
-async function viewInventory(c) {
-  c.append(el('button', { class: 'btn', onclick: () => crudModal('+ Item', '/api/inventory', [
-    { name: 'name', label: 'Nombre', required: true },
-    { name: 'quantity', label: 'Cantidad', type: 'number' },
-    { name: 'unit', label: 'Unidad' },
-    { name: 'min_stock', label: 'Stock mínimo', type: 'number' }
-  ]) }, '+ Item'));
-  const { items } = await API.get('/api/inventory');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  if (!items.length) list.append(emptyState('📦', 'Inventario vacío'));
-  items.forEach(i => list.append(el('div', { class: 'list-item' },
-    el('div', {}, el('div', { style: { fontWeight: 600 } }, i.name),
-      el('div', { class: 'meta' }, `${i.quantity} ${i.unit} · mín ${i.min_stock}`)),
-    Number(i.quantity) <= Number(i.min_stock) && el('span', { class: 'badge overdue' }, 'Reponer')
-  )));
-  c.append(list);
-}
-
-// ============= VIEW: MESSAGES =============
-async function viewMessages(c) {
-  const { messages } = await API.get('/api/messages');
-  const box = el('div', { class: 'card', style: { maxHeight: '60vh', overflowY: 'auto' } });
-  messages.slice().reverse().forEach(m => box.append(el('div', { style: { padding: '8px 0', borderBottom: '1px solid var(--border)' } },
-    el('div', { style: { fontWeight: 600 } }, m.from_name),
-    el('div', {}, m.body),
-    el('div', { class: 'meta' }, fmtDate(m.created_at))
-  )));
-  c.append(box);
-  const f = el('form', { style: { display: 'flex', gap: '8px', marginTop: '12px' }, onsubmit: async (e) => {
-    e.preventDefault();
-    const fd = new FormData(f);
-    await API.post('/api/messages', { body: fd.get('body') });
-    f.reset(); render();
-  } },
-    el('input', { name: 'body', placeholder: 'Escribe a la casa...', required: true }),
-    el('button', { class: 'btn' }, 'Enviar'));
-  c.append(f);
-}
-
-// ============= VIEW: USERS =============
-async function viewUsers(c) {
-  if (state.user.role !== 'tenant') {
-    c.append(el('button', { class: 'btn', onclick: () => crudModal('+ Persona', '/api/users', [
-      { name: 'full_name', label: 'Nombre', required: true },
-      { name: 'email', label: 'Email', type: 'email', required: true },
-      { name: 'phone', label: 'Teléfono' },
-      { name: 'password', label: 'Contraseña inicial', type: 'password' },
-      { name: 'role', label: 'Rol', type: 'select', options: ['tenant','owner','admin'] }
-    ]) }, '+ Persona'));
-  }
-  const { users } = await API.get('/api/users');
-  const list = el('div', { class: 'list', style: { marginTop: '14px' } });
-  users.forEach(u => list.append(el('div', { class: 'list-item' },
-    el('div', {},
-      el('div', { style: { fontWeight: 600 } }, u.full_name),
-      el('div', { class: 'meta' }, `${u.email} · ${u.role}`)
-    ),
-    el('span', { class: 'badge ' + (u.is_active ? 'paid' : 'overdue') }, u.is_active ? 'Activo' : 'Inactivo')
-  )));
-  c.append(list);
-}
-
-// ============= VIEW: SETTINGS =============
+// ===================== AJUSTES =====================
 function viewSettings(c) {
-  c.append(el('div', { class: 'card' },
-    el('h3', {}, 'Apariencia'),
-    el('div', { style: { display: 'flex', gap: '8px', marginBottom: '20px' } },
-      el('button', { class: 'btn ghost', onclick: () => setTheme('light') }, '☀️ Claro'),
-      el('button', { class: 'btn ghost', onclick: () => setTheme('dark') }, '🌙 Oscuro')
-    ),
-    el('h3', {}, 'Idioma'),
-    el('div', { style: { display: 'flex', gap: '8px' } },
-      el('button', { class: 'btn ghost', onclick: () => I18N.set('es') }, '🇪🇸 Español'),
-      el('button', { class: 'btn ghost', onclick: () => I18N.set('en') }, '🇺🇸 English')
-    ),
-    el('h3', { style: { marginTop: '24px' } }, 'Cuenta'),
-    el('div', { class: 'meta' }, state.user.email, ' · ', state.user.role),
-    el('button', { class: 'btn danger', style: { marginTop: '14px' }, onclick: logout }, 'Cerrar sesión')
+  c.append(el('div', { class:'topbar' }, el('h1', {}, '⚙️ Ajustes')));
+  c.append(el('div', { class:'detail-section' },
+    el('h3', {}, '👤 Mi cuenta'),
+    el('p', {}, el('b', {}, 'Nombre: '), state.user.full_name),
+    el('p', {}, el('b', {}, 'Correo: '), state.user.email),
+    el('p', {}, el('b', {}, 'Rol: '), state.user.role),
+    el('hr'),
+    el('h3', {}, '🎨 Apariencia'),
+    el('button', { class:'btn ghost', onclick:()=> setTheme(state.theme==='dark'?'light':'dark') },
+      state.theme==='dark' ? '☀️ Modo claro' : '🌙 Modo oscuro'),
+    el('hr'),
+    el('button', { class:'btn danger', onclick: logout }, '🚪 Cerrar sesión')
   ));
 }
-function openSettings() { state.view = 'settings'; render(); }
 
-// ============= AI MODAL =============
-function openAi() {
+// ===================== ASISTENTE IA =====================
+function openAI() {
+  const out = el('div', { style:{ minHeight:'80px', padding:'14px', background:'var(--bg)', borderRadius:'12px', marginBottom:'14px', whiteSpace:'pre-wrap' } }, '👋 Hola, ¿en qué te ayudo?');
   const m = modal(el('div', {},
-    el('h3', {}, '🤖 Asistente Casa'),
-    el('div', { id: 'ai-output', style: { minHeight: '60px', padding: '12px', background: 'var(--surface-2)', borderRadius: '10px', marginBottom: '12px' } }, '¿En qué te ayudo?'),
-    el('form', { onsubmit: async (e) => {
-      e.preventDefault();
-      const inp = e.target.elements.q;
-      const out = $('#ai-output');
-      out.textContent = 'Pensando...';
-      try {
-        const r = await API.post('/api/ai/ask', { prompt: inp.value });
-        out.textContent = r.answer;
-      } catch (err) { out.textContent = '⚠️ ' + err.message; }
-    } },
-      el('div', { style: { display: 'flex', gap: '8px' } },
-        el('input', { name: 'q', placeholder: t('ai_placeholder'), required: true }),
-        el('button', { class: 'btn' }, 'Enviar')
-      )
-    )
+    el('h3', {}, '🤖 Asistente Mi Casa'),
+    out,
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const q = $('input', f).value.trim(); if (!q) return;
+        out.textContent = '⏳ Pensando...';
+        try {
+          const { answer } = await API.post('/api/ai', { question: q });
+          out.textContent = answer || '(sin respuesta)';
+        } catch (err) { out.textContent = err.message; }
+      }});
+      f.append(
+        el('div', { class:'field' },
+          el('input', { type:'text', placeholder:'Ej: ¿Cuál apartamento tiene mora?', required:true })
+        ),
+        el('button', { class:'btn block', type:'submit' }, 'Preguntar')
+      );
+      return f;
+    })()
   ));
 }
 
-// ============= UTILS =============
-function emptyState(emoji, msg) {
-  return el('div', { class: 'empty' }, el('div', { class: 'emoji' }, emoji), el('div', {}, msg));
-}
-
-function formBuilder(fields, onSubmit) {
-  const f = el('form', { onsubmit: async (e) => {
-    e.preventDefault();
-    const fd = new FormData(f);
-    const data = {};
-    for (const [k, v] of fd.entries()) {
-      const def = fields.find(x => x.name === k);
-      if (def?.type === 'checkbox') data[k] = true;
-      else if (def?.type === 'number') data[k] = v ? Number(v) : null;
-      else data[k] = v;
-    }
-    fields.filter(x => x.type === 'checkbox' && !data[x.name]).forEach(x => data[x.name] = false);
-    try { await onSubmit(data); } catch (err) { toast(err.message, 'error'); }
-  }});
-  fields.forEach(fd => {
-    let input;
-    if (fd.type === 'textarea') {
-      input = el('textarea', { name: fd.name, rows: 3, required: fd.required });
-    } else if (fd.type === 'select') {
-      input = el('select', { name: fd.name, required: fd.required },
-        ...fd.options.map(o => typeof o === 'string'
-          ? el('option', { value: o }, o)
-          : el('option', { value: o.value }, o.label)));
-    } else if (fd.type === 'checkbox') {
-      input = el('label', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-        el('input', { type: 'checkbox', name: fd.name, style: { width: 'auto' } }),
-        el('span', {}, fd.label));
-    } else {
-      input = el('input', { name: fd.name, type: fd.type || 'text', required: fd.required });
-    }
-    if (fd.type === 'checkbox') f.append(el('div', { class: 'field' }, input));
-    else f.append(el('div', { class: 'field' }, el('label', {}, fd.label), input));
-  });
-  f.append(el('button', { class: 'btn', style: { width: '100%' } }, t('save')));
-  return f;
-}
-
-function crudModal(title, endpoint, fields) {
-  const m = modal(el('div', {},
-    el('h3', {}, title),
-    formBuilder(fields, async (data) => {
-      await API.post(endpoint, data);
-      m.close(); render(); toast('Guardado', 'success');
-    })
-  ));
-}
-
-// PWA Service Worker
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
-
-// ============= GO =============
+// ===================== INIT =====================
 boot();
 })();

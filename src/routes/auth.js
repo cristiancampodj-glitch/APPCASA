@@ -15,6 +15,7 @@ router.post('/register', async (req, res, next) => {
 
     // Crea casa si manda house_name
     let house_id = null;
+    let house_to_set_owner = null;
     if (house_name) {
       const cur = ((currency || 'COP') + '').toUpperCase();
       const h = await query(
@@ -22,6 +23,7 @@ router.post('/register', async (req, res, next) => {
         [house_name, cur]
       );
       house_id = h.rows[0].id;
+      house_to_set_owner = house_id;
     }
 
     const password_hash = await hash(password);
@@ -33,6 +35,9 @@ router.post('/register', async (req, res, next) => {
       [house_id, full_name, email, phone || null, password_hash, role]
     );
     const user = u.rows[0];
+    if (house_to_set_owner) {
+      await query(`UPDATE houses SET owner_id=$1 WHERE id=$2`, [user.id, house_to_set_owner]);
+    }
     const token = sign({ id: user.id, role: user.role, house_id: user.house_id, email: user.email });
     res.json({ user, token });
   } catch (e) { next(e); }
