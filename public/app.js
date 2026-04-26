@@ -984,21 +984,178 @@ function openReportDamage() {
 
 // ===================== AVISOS =====================
 async function viewAnnouncements(c) {
-  c.append(el('div', { class:'topbar' }, el('h1', {}, '💬 Avisos')));
+  const isOwner = ['owner','admin'].includes(state.user.role);
+  c.append(el('div', { class:'topbar' },
+    el('h1', {}, '💬 Avisos'),
+    el('div', { class:'topbar-actions' },
+      el('button', { class:'btn', onclick: openComposeAnnouncement }, '✏️ Nuevo aviso')
+    )
+  ));
   const sec = el('div', { class:'detail-section' });
   c.append(sec);
   try {
     const { announcements } = await API.get('/api/announcements');
-    if (!announcements || !announcements.length) return sec.append(emptyState('📭', 'Sin avisos'));
+    if (!announcements || !announcements.length) {
+      sec.append(emptyState('📭', isOwner
+        ? 'Aún no has enviado avisos. Toca "Nuevo aviso" para escribir uno.'
+        : 'Sin avisos por ahora.'));
+      return;
+    }
     const list = el('div', { class:'list' });
-    announcements.forEach(a => list.append(el('div', { class:'list-item' },
-      el('div', {},
-        el('div', { class:'name' }, a.title),
-        el('div', { class:'meta' }, (a.author_name || '') + ' · ' + fmtDate(a.created_at))
-      )
-    )));
+    announcements.forEach(a => {
+      // Etiqueta del destinatario
+      let badge;
+      if (a.target_user_id) {
+        badge = el('span', { class:'badge', style:{ background:'#7c3aed', color:'#fff' } },
+          '👤 ' + (a.target_name || 'Privado'));
+      } else {
+        badge = el('span', { class:'badge', style:{ background:'#0ea5e9', color:'#fff' } },
+          '📢 ' + (a.house_name || 'Todos'));
+      }
+      const item = el('div', { class:'list-item' },
+        el('div', { style:{ flex:1 } },
+          el('div', { class:'name' }, (a.pinned ? '📌 ' : '') + a.title),
+          el('div', { style:{ marginTop:'4px', fontSize:'15px', whiteSpace:'pre-wrap' } }, a.body),
+          el('div', { class:'meta', style:{ marginTop:'6px' } },
+            (a.author_name || '') + ' · ' + fmtDate(a.created_at))
+        ),
+        el('div', { class:'list-actions' },
+          badge,
+          (isOwner || a.author_id === state.user.id) &&
+            el('button', { class:'btn sm ghost', onclick: async () => {
+              if (!confirm('¿Eliminar este aviso?')) return;
+              try { await API.del('/api/announcements/' + a.id); toast('Eliminado', 'success'); render(); }
+              catch (err) { toast(err.message, 'error'); }
+            }}, '🗑️')
+        )
+      );
+      list.append(item);
+    });
     sec.append(list);
   } catch (e) { sec.append(emptyState('⚠️', e.message)); }
+}
+
+// Modal para componer aviso
+async function openComposeAnnouncement() {
+  const isOwner = ['owner','admin'].includes(state.user.role);
+  let houses = [];
+  if (isOwner) {
+    try { const r = await API.get('/api/houses'); houses = r.houses || []; } catch {}
+  }
+
+  // Estado del compositor
+  let scope = 'all';        // all | house | user
+  let chosenHouse = '';
+  let chosenUser = '';
+
+  const houseSelect = el('select', { name:'house_id', onchange: (e) => {
+    chosenHouse = e.target.value;
+    refreshUsers();
+  }},
+    el('option', { value:'' }, '— Elige una propiedad —'),
+    ...houses.map(h => el('option', { value: h.id }, h.name + ((h.tenants && h.tenants.length) ? ' · ' + h.tenants.length + ' inquilino(s)' : ' · sin inquilino')))
+  );
+
+  const userSelect = el('select', { name:'target_user_id', onchange: (e) => { chosenUser = e.target.value; } },
+    el('option', { value:'' }, '— Primero elige una propiedad —')
+  );
+
+  function refreshUsers() {
+    userSelect.innerHTML = '';
+    const h = houses.find(x => x.id === chosenHouse);
+    const tenants = (h && h.tenants) || [];
+    if (!tenants.length) {
+      userSelect.append(el('option', { value:'' }, 'Esta propiedad no tiene inquilinos'));
+    } else {
+      userSelect.append(el('option', { value:'' }, '— Elige inquilino —'));
+      tenants.forEach(t => userSelect.append(el('option', { value: t.id }, t.name + ' · ' + t.email)));
+    }
+  }
+
+  // Tarjetas selector de alcance (solo dueño)
+  const scopeCard = (val, icon, label, desc) => el('button', {
+    type:'button',
+    class:'btn ' + (scope === val ? 'success' : 'ghost'),
+    style:{ flex:'1', minWidth:'140px', padding:'14px', textAlign:'left', flexDirection:'column', alignItems:'flex-start' },
+    onclick: () => {
+      scope = val;
+      [...scopeRow.querySelectorAll('button')].forEach(b => b.classList.remove('success'));
+      [...scopeRow.querySelectorAll('button')].forEach(b => b.classList.add('ghost'));
+      const me = scopeRow.querySelector(`[data-scope="${val}"]`);
+      if (me) { me.classList.remove('ghost'); me.classList.add('success'); }
+      houseField.style.display = (val === 'house' || val === 'user') ? '' : 'none';
+      userField.style.display  = (val === 'user') ? '' : 'none';
+    },
+    'data-scope': val
+  },
+    el('div', { style:{ fontSize:'22px' } }, icon),
+    el('div', { style:{ fontWeight:'700' } }, label),
+    el('div', { style:{ fontSize:'13px', opacity:0.8 } }, desc)
+  );
+
+  const scopeRow = el('div', {
+    style:{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'14px' }
+  });
+
+  if (isOwner) {
+    scopeRow.append(
+      scopeCard('all',   '📢', 'A todos',         'Todas mis propiedades'),
+      scopeCard('house', '🏠', 'Una propiedad',   'Solo esa casa'),
+      scopeCard('user',  '👤', 'Persona',         'Un inquilino')
+    );
+  }
+
+  const houseField = el('div', { class:'field', style:{ display:'none' } },
+    el('label', {}, 'Propiedad'), houseSelect);
+  const userField = el('div', { class:'field', style:{ display:'none' } },
+    el('label', {}, 'Inquilino'), userSelect);
+
+  const m = modal(el('div', {},
+    el('h3', {}, '✏️ Nuevo aviso'),
+    isOwner && scopeRow,
+    isOwner && houseField,
+    isOwner && userField,
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        const payload = { title: data.title, body: data.body, pinned: !!data.pinned };
+        if (isOwner) {
+          payload.scope = scope;
+          if (scope === 'house') {
+            if (!chosenHouse) return toast('Elige una propiedad', 'error');
+            payload.house_id = chosenHouse;
+          }
+          if (scope === 'user') {
+            if (!chosenHouse) return toast('Elige una propiedad', 'error');
+            if (!chosenUser) return toast('Elige el inquilino', 'error');
+            payload.house_id = chosenHouse;
+            payload.target_user_id = chosenUser;
+          }
+        }
+        try {
+          const r = await API.post('/api/announcements', payload);
+          m.close();
+          toast(`Aviso enviado ✅${r.count > 1 ? ' (' + r.count + ' propiedades)' : ''}`, 'success');
+          render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('title', 'Título', 'text', true),
+        el('div', { class:'field' },
+          el('label', {}, 'Mensaje'),
+          el('textarea', { name:'body', rows:5, required:true,
+            placeholder:'Escribe el mensaje aquí…' })
+        ),
+        el('label', { style:{ display:'flex', alignItems:'center', gap:'8px', margin:'8px 0 16px' } },
+          el('input', { type:'checkbox', name:'pinned', value:'1' }),
+          el('span', {}, '📌 Fijar este aviso arriba')
+        ),
+        el('button', { class:'btn lg block success', type:'submit' }, '📤 Publicar aviso')
+      );
+      return f;
+    })()
+  ));
 }
 
 // ===================== AJUSTES =====================

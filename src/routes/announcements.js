@@ -2,31 +2,129 @@ const router = require('express').Router();
 const { query } = require('../db');
 const { requireAuth } = require('../middleware');
 
+// GET /api/announcements
+// - Inquilino: avisos de su casa, donde target sea NULL o sea él
+// - Dueño: todos los avisos de las casas que posee
 router.get('/', requireAuth, async (req, res, next) => {
   try {
-    const r = await query(
-      `SELECT a.*, u.full_name AS author_name,
-              (SELECT COUNT(*) FROM announcement_likes l WHERE l.announcement_id = a.id) AS likes,
-              (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id = a.id) AS comments,
-              EXISTS(SELECT 1 FROM announcement_likes l WHERE l.announcement_id = a.id AND l.user_id = $2) AS liked
-       FROM announcements a JOIN users u ON u.id = a.author_id
-       WHERE a.house_id = $1
-       ORDER BY a.pinned DESC, a.created_at DESC`,
-      [req.user.house_id, req.user.id]
-    );
+    const isOwner = ['owner', 'admin'].includes(req.user.role);
+    const sql = isOwner
+      ? `SELECT a.*, u.full_name AS author_name, h.name AS house_name,
+                tu.full_name AS target_name,
+                (SELECT COUNT(*) FROM announcement_likes l WHERE l.announcement_id = a.id) AS likes,
+                (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id = a.id) AS comments,
+                EXISTS(SELECT 1 FROM announcement_likes l WHERE l.announcement_id = a.id AND l.user_id = $1) AS liked
+         FROM announcements a
+         JOIN users u ON u.id = a.author_id
+         JOIN houses h ON h.id = a.house_id
+         LEFT JOIN users tu ON tu.id = a.target_user_id
+         WHERE h.owner_id = $1
+         ORDER BY a.pinned DESC, a.created_at DESC`
+      : `SELECT a.*, u.full_name AS author_name, h.name AS house_name,
+                tu.full_name AS target_name,
+                (SELECT COUNT(*) FROM announcement_likes l WHERE l.announcement_id = a.id) AS likes,
+                (SELECT COUNT(*) FROM announcement_comments c WHERE c.announcement_id = a.id) AS comments,
+                EXISTS(SELECT 1 FROM announcement_likes l WHERE l.announcement_id = a.id AND l.user_id = $1) AS liked
+         FROM announcements a
+         JOIN users u ON u.id = a.author_id
+         JOIN houses h ON h.id = a.house_id
+         LEFT JOIN users tu ON tu.id = a.target_user_id
+         WHERE a.house_id = $2
+           AND (a.target_user_id IS NULL OR a.target_user_id = $1)
+         ORDER BY a.pinned DESC, a.created_at DESC`;
+    const params = isOwner ? [req.user.id] : [req.user.id, req.user.house_id];
+    const r = await query(sql, params);
     res.json({ announcements: r.rows });
   } catch (e) { next(e); }
 });
 
+// POST /api/announcements
+// Body:
+//  - title, body, pinned
+//  - scope: 'all' (todas mis propiedades) | 'house' (una propiedad) | 'user' (un inquilino)
+//  - house_id (req cuando scope=house o user)
+//  - target_user_id (req cuando scope=user)
 router.post('/', requireAuth, async (req, res, next) => {
   try {
-    const { title, body, pinned } = req.body;
+    const { title, body, pinned, scope, house_id, target_user_id } = req.body;
+    if (!title || !body) return res.status(400).json({ error: 'Faltan título o cuerpo' });
+
+    const isOwner = ['owner', 'admin'].includes(req.user.role);
+
+    // Inquilino solo puede publicar en su propia casa, sin target (chat de casa)
+    if (!isOwner) {
+      const r = await query(
+        `INSERT INTO announcements (house_id, author_id, title, body, pinned)
+         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+        [req.user.house_id, req.user.id, title, body, !!pinned]
+      );
+      return res.status(201).json({ announcement: r.rows[0], count: 1 });
+    }
+
+    // Dueño: 3 alcances
+    if (scope === 'all') {
+      const houses = await query(
+        `SELECT id FROM houses WHERE owner_id=$1 AND COALESCE(status,'available')<>'archived'`,
+        [req.user.id]
+      );
+      if (!houses.rows.length) return res.status(400).json({ error: 'No tienes propiedades' });
+      const inserted = [];
+      for (const h of houses.rows) {
+        const r = await query(
+          `INSERT INTO announcements (house_id, author_id, title, body, pinned)
+           VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+          [h.id, req.user.id, title, body, !!pinned]
+        );
+        inserted.push(r.rows[0]);
+      }
+      return res.status(201).json({ announcement: inserted[0], count: inserted.length });
+    }
+
+    if (scope === 'user') {
+      if (!target_user_id) return res.status(400).json({ error: 'Falta destinatario' });
+      const u = await query(
+        `SELECT u.id, u.house_id, h.owner_id FROM users u
+         JOIN houses h ON h.id = u.house_id
+         WHERE u.id = $1`, [target_user_id]
+      );
+      if (!u.rows[0] || u.rows[0].owner_id !== req.user.id) {
+        return res.status(403).json({ error: 'Inquilino no encontrado en tus propiedades' });
+      }
+      const r = await query(
+        `INSERT INTO announcements (house_id, author_id, title, body, pinned, target_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [u.rows[0].house_id, req.user.id, title, body, !!pinned, target_user_id]
+      );
+      return res.status(201).json({ announcement: r.rows[0], count: 1 });
+    }
+
+    // scope === 'house' (default)
+    const targetHouse = house_id;
+    if (!targetHouse) return res.status(400).json({ error: 'Falta propiedad' });
+    const own = await query(`SELECT 1 FROM houses WHERE id=$1 AND owner_id=$2`, [targetHouse, req.user.id]);
+    if (!own.rows[0]) return res.status(403).json({ error: 'Propiedad no autorizada' });
     const r = await query(
       `INSERT INTO announcements (house_id, author_id, title, body, pinned)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [req.user.house_id, req.user.id, title, body, !!pinned]
+      [targetHouse, req.user.id, title, body, !!pinned]
     );
-    res.status(201).json({ announcement: r.rows[0] });
+    res.status(201).json({ announcement: r.rows[0], count: 1 });
+  } catch (e) { next(e); }
+});
+
+// DELETE — solo el autor o el dueño de la casa
+router.delete('/:id', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(
+      `DELETE FROM announcements a
+       USING houses h
+       WHERE a.id = $1 AND a.house_id = h.id
+         AND (a.author_id = $2 OR h.owner_id = $2)
+       RETURNING a.id`,
+      [req.params.id, req.user.id]
+    );
+    if (!r.rows[0]) return res.status(403).json({ error: 'No autorizado' });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

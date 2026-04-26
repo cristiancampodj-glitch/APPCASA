@@ -1,4 +1,4 @@
-const CACHE = 'micasa-v6';
+const CACHE = 'micasa-v7';
 const ASSETS = ['./', './index.html', './styles.css', './app.js', './manifest.json'];
 
 self.addEventListener('install', e => {
