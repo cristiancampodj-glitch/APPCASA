@@ -423,6 +423,8 @@ async function loadPayments(container, house) {
       el('div', { class:'list-actions' },
         el('span', { class:'badge ' + p.status }, p.status),
         p.status !== 'paid' && state.user.role !== 'tenant' &&
+          el('button', { class:'btn sm', onclick:()=> remindPayment(p, house) }, '📲 Recordar'),
+        p.status !== 'paid' && state.user.role !== 'tenant' &&
           el('button', { class:'btn sm success', onclick:()=> markPaid(p) }, '✓ Pagado'),
         p.status === 'paid' &&
           el('a', { class:'btn sm ghost', href:`/api/payments/${p.id}/receipt.pdf`, target:'_blank' }, '📄 PDF')
@@ -439,12 +441,23 @@ async function loadDamages(container, house) {
     if (!filtered.length) { container.append(emptyState('✅', 'Sin daños reportados')); return; }
     const list = el('div', { class:'list' });
     filtered.forEach(d => list.append(el('div', { class:'list-item' },
-      el('div', {},
-        el('div', { class:'name' }, '🛠️ ' + d.title),
-        el('div', { class:'meta' }, `${d.location || '—'} · ${fmtDate(d.created_at)}`)
+      el('div', { style:{ display:'flex', gap:'12px', alignItems:'center' } },
+        d.photo_url && el('img', { src: d.photo_url, alt:'',
+          style:{ width:'56px', height:'56px', objectFit:'cover', borderRadius:'8px', cursor:'pointer' },
+          onclick:()=> window.open(d.photo_url, '_blank') }),
+        el('div', {},
+          el('div', { class:'name' }, '🛠️ ' + d.title),
+          el('div', { class:'meta' }, `${d.location || '—'} · ${fmtDate(d.created_at)} · ${d.reporter_name || ''}`)
+        )
       ),
       el('div', { class:'list-actions' },
-        el('span', { class:'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status)
+        el('span', { class:'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status),
+        state.user.role !== 'tenant' && d.status !== 'resolved' &&
+          el('button', { class:'btn sm success', onclick: async () => {
+            try { await API.patch('/api/damages/' + d.id, { status:'resolved' });
+              toast('Resuelto ✅', 'success'); render(); }
+            catch (e) { toast(e.message, 'error'); }
+          }}, '✓ Resuelto')
       )
     )));
     container.append(list);
@@ -500,6 +513,12 @@ function editHouse(h) {
         field('address', 'Dirección', 'text', false, h.address || ''),
         field('city', 'Ciudad', 'text', false, h.city || ''),
         field('monthly_rent', 'Arriendo mensual', 'number', false, h.monthly_rent || ''),
+        field('owner_whatsapp', 'Tu WhatsApp (con país, ej: +573001234567)', 'tel', false, h.owner_whatsapp || ''),
+        el('div', { class:'field' },
+          el('label', {}, '🏦 Datos bancarios (los verá el inquilino para pagar)'),
+          el('textarea', { name:'bank_info', rows:4,
+            placeholder:'Ej:\nBancolombia – Ahorros\nN° 123-456789-00\nA nombre de Juan Pérez\nCC 12345678' }, h.bank_info || '')
+        ),
         el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar'),
         el('button', { class:'btn ghost block', type:'button', style:{ marginTop:'8px' }, onclick: async () => {
           if (!confirm('¿Archivar esta propiedad?')) return;
@@ -559,16 +578,165 @@ async function markPaid(p) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
-// ===================== VISTA INQUILINO =====================
-async function viewTenantHome(c) {
-  c.append(el('div', { class:'topbar' }, el('h1', {}, '🏠 Mi Apartamento')));
+// Recordatorio de pago vía WhatsApp (sin Twilio): abre wa.me con texto pre-llenado
+async function remindPayment(p, house) {
+  let phone = '';
+  let name = p.tenant_name || '';
   try {
-    const { houses } = await API.get('/api/houses');
-    if (!houses.length) return c.append(emptyState('🏠', 'No tienes apartamento asignado'));
-    state.houses = houses;
-    state.currentHouseId = houses[0].id;
-    render();
-  } catch (e) { c.append(emptyState('⚠️', e.message)); }
+    const { users } = await API.get('/api/users');
+    const u = (users || []).find(x => x.id === p.tenant_id);
+    if (u) { phone = (u.whatsapp || u.phone || '').replace(/\D/g,''); name = u.full_name || name; }
+  } catch {}
+  if (!phone) {
+    const ask = prompt('Número de WhatsApp del inquilino (con código país, ej: +573001234567):');
+    if (!ask) return;
+    phone = ask.replace(/\D/g,'');
+  }
+  const cur = p.currency || house.currency || 'COP';
+  const txt = `Hola ${name.split(' ')[0]} 👋\n\nTe recuerdo el pago del arriendo:\n\n💰 ${fmtMoney(p.amount, cur)}\n📅 Vence: ${fmtDate(p.due_date)}\n🏠 ${house.name}\n\n¿Me avisas cuando lo realices? Gracias.`;
+  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(txt)}`, '_blank');
+}
+
+// ===================== VISTA INQUILINO (super simple, 3 acciones) =====================
+async function viewTenantHome(c) {
+  c.append(el('div', { class:'topbar' },
+    el('h1', {}, '👋 Hola, ' + (state.user.full_name || '').split(' ')[0]),
+    el('button', { class:'icon-btn', onclick:()=> setTheme(state.theme==='dark'?'light':'dark') },
+      state.theme==='dark'?'☀️':'🌙')
+  ));
+
+  // Banner: próximo pago grande
+  const banner = el('div', { class:'detail-section' });
+  c.append(banner);
+  banner.append(el('div', { class:'spinner' }));
+
+  let info;
+  try { info = await API.get('/api/payments/next'); }
+  catch (e) { banner.innerHTML = ''; banner.append(emptyState('⚠️', e.message)); return; }
+
+  banner.innerHTML = '';
+  const p = info.payment;
+  const h = info.house || {};
+  const cur = (p && p.currency) || h.house_currency || 'COP';
+
+  if (p) {
+    const isOverdue = p.status === 'overdue' || (new Date(p.due_date) < new Date());
+    banner.append(
+      el('div', { style:{ textAlign:'center', padding:'20px 8px' } },
+        el('div', { style:{ fontSize:'18px', color:'var(--text-muted)', marginBottom:'8px' } },
+          isOverdue ? '⚠️ Tienes un pago vencido' : 'Tu próximo pago'),
+        el('div', { style:{ fontSize:'56px', fontWeight:'800', color: isOverdue ? 'var(--danger)' : 'var(--primary)', lineHeight:'1.1' } },
+          fmtMoney(p.amount, cur)),
+        el('div', { style:{ fontSize:'18px', color:'var(--text-muted)', marginTop:'8px' } },
+          'Vence ' + fmtDate(p.due_date) + ' · ' + p.period_month + '/' + p.period_year)
+      )
+    );
+  } else {
+    banner.append(el('div', { style:{ textAlign:'center', padding:'20px' } },
+      el('div', { style:{ fontSize:'48px' } }, '✅'),
+      el('div', { style:{ fontSize:'24px', fontWeight:'700', color:'var(--success)' } }, 'No tienes pagos pendientes'),
+      el('div', { style:{ color:'var(--text-muted)', marginTop:'8px' } }, '¡Estás al día!')
+    ));
+  }
+
+  // 3 acciones grandes
+  const actions = el('div', {
+    style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:'16px', marginBottom:'20px' }
+  });
+  c.append(actions);
+
+  actions.append(
+    el('button', { class:'btn lg success', onclick:()=> showPayInfo(p, h, cur) },
+      '💳 Pagar arriendo'),
+    el('button', { class:'btn lg warning', onclick: openReportDamage },
+      '🛠️ Reportar daño'),
+    el('button', { class:'btn lg', onclick:()=> openWhatsAppOwner(h) },
+      '📲 Hablar con el dueño')
+  );
+
+  // Mi apartamento (info)
+  c.append(el('div', { class:'detail-section' },
+    el('h3', {}, '🏠 Mi apartamento'),
+    el('div', {}, el('b', {}, h.house_name || '—')),
+    h.owner_name && el('div', { style:{ marginTop:'8px', color:'var(--text-muted)' } },
+      'Dueño: ' + h.owner_name + (h.owner_email ? ' · ' + h.owner_email : ''))
+  ));
+
+  // Histórico simplificado
+  await tenantHistory(c);
+}
+
+async function tenantHistory(c) {
+  try {
+    const { payments } = await API.get('/api/payments');
+    if (!payments.length) return;
+    const sec = el('div', { class:'detail-section' });
+    sec.append(el('h3', {}, '📋 Mi historial'));
+    const list = el('div', { class:'list' });
+    payments.slice(0, 6).forEach(p => list.append(el('div', { class:'list-item' },
+      el('div', {},
+        el('div', { class:'name' }, p.period_month + '/' + p.period_year),
+        el('div', { class:'meta' }, fmtMoney(p.amount, p.currency) + ' · ' +
+          (p.status === 'paid' ? 'Pagado ' + fmtDate(p.paid_at) : 'Vence ' + fmtDate(p.due_date)))
+      ),
+      el('div', { class:'list-actions' },
+        el('span', { class:'badge ' + p.status }, p.status),
+        p.status === 'paid' &&
+          el('a', { class:'btn sm ghost', href:`/api/payments/${p.id}/receipt.pdf`, target:'_blank' }, '📄')
+      )
+    )));
+    sec.append(list);
+    c.append(sec);
+  } catch {}
+}
+
+// Mostrar opciones de pago: link en línea + datos bancarios para copiar
+function showPayInfo(p, h, cur) {
+  if (!p) return toast('No tienes pagos pendientes ✅', 'success');
+
+  const m = modal(el('div', {},
+    el('h3', {}, '💳 Pagar arriendo'),
+    el('div', { style:{ textAlign:'center', padding:'10px 0 20px' } },
+      el('div', { style:{ color:'var(--text-muted)' } }, 'Total a pagar'),
+      el('div', { style:{ fontSize:'42px', fontWeight:'800', color:'var(--primary)' } }, fmtMoney(p.amount, cur))
+    ),
+
+    // Botón: pago en línea
+    el('button', { class:'btn lg block success', onclick: async () => {
+      try {
+        const { checkout_url } = await API.post(`/api/payments/${p.id}/checkout`);
+        window.open(checkout_url, '_blank');
+      } catch (err) { toast(err.message, 'error'); }
+    }}, '🌐 Pagar en línea (Mercado Pago)'),
+
+    el('div', { style:{ textAlign:'center', margin:'14px 0', color:'var(--text-muted)' } }, '— o —'),
+
+    // Datos bancarios
+    h.bank_info
+      ? el('div', {},
+          el('div', { style:{ background:'var(--bg)', padding:'16px', borderRadius:'12px', whiteSpace:'pre-wrap', fontSize:'17px', lineHeight:'1.6' } }, h.bank_info),
+          el('button', { class:'btn block', style:{ marginTop:'10px' }, onclick: () => {
+            navigator.clipboard.writeText(h.bank_info);
+            toast('Datos copiados ✅', 'success');
+          }}, '📋 Copiar datos para transferencia')
+        )
+      : el('div', { class:'empty' }, el('div', { class:'msg' }, 'El dueño aún no configuró sus datos bancarios')),
+
+    el('hr'),
+    el('button', { class:'btn ghost block', onclick: () => {
+      const txt = `Hola${h.owner_name ? ' '+h.owner_name.split(' ')[0] : ''}, ya hice la transferencia del arriendo de ${fmtMoney(p.amount, cur)} (${p.period_month}/${p.period_year}). Por favor confírmame cuando te llegue.`;
+      const phone = (h.owner_whatsapp || h.owner_phone || '').replace(/\D/g,'');
+      if (!phone) return toast('El dueño no tiene WhatsApp configurado', 'error');
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(txt)}`, '_blank');
+    }}, '📲 Avisar al dueño por WhatsApp')
+  ));
+}
+
+function openWhatsAppOwner(h) {
+  const phone = (h.owner_whatsapp || h.owner_phone || '').replace(/\D/g,'');
+  if (!phone) return toast('El dueño no tiene WhatsApp configurado', 'error');
+  const txt = `Hola${h.owner_name ? ' '+h.owner_name.split(' ')[0] : ''}, soy tu inquilino de ${h.house_name || ''}.`;
+  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(txt)}`, '_blank');
 }
 
 // ===================== VISTAS GLOBALES (todos los pagos / daños) =====================
@@ -618,25 +786,76 @@ async function viewAllDamages(c) {
 }
 
 function openReportDamage() {
+  let photoDataUrl = null;
+  const preview = el('div', { style:{ marginTop:'8px' } });
+
   const m = modal(el('div', {},
     el('h3', {}, '🛠️ Reportar daño'),
+    el('p', { style:{ color:'var(--text-muted)', marginTop:'-6px' } },
+      'Toma una foto del daño para que el dueño pueda verlo enseguida.'),
     (() => {
       const f = el('form', { onsubmit: async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
+        if (!data.title) return toast('Pon un título corto', 'error');
+        data.photo_url = photoDataUrl;
         try {
           await API.post('/api/damages', data);
           m.close(); toast('Daño reportado ✅', 'success'); render();
         } catch (err) { toast(err.message, 'error'); }
       }});
+
+      // Botón cámara con preview
+      const fileInput = el('input', {
+        type:'file', accept:'image/*', capture:'environment',
+        style:{ display:'none' },
+        onchange: (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          // Comprimir antes de enviar
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => {
+              const max = 1024;
+              const scale = Math.min(1, max / Math.max(img.width, img.height));
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width * scale;
+              canvas.height = img.height * scale;
+              canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+              photoDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+              preview.innerHTML = '';
+              preview.append(el('img', { src: photoDataUrl,
+                style:{ maxWidth:'100%', borderRadius:'12px', maxHeight:'240px' } }));
+            };
+            img.src = ev.target.result;
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
       f.append(
         field('title', 'Título (ej: Fuga en baño)', 'text', true),
-        field('location', 'Ubicación (ej: cocina)', 'text'),
+        field('location', 'Ubicación (ej: cocina, baño principal)', 'text'),
         el('div', { class:'field' },
           el('label', {}, 'Descripción'),
-          el('textarea', { name:'description', rows:4, placeholder:'Cuéntanos qué pasó...' })
+          el('textarea', { name:'description', rows:3, placeholder:'¿Qué pasó? ¿Hace cuánto?' })
         ),
-        el('button', { class:'btn lg block', type:'submit' }, '📤 Enviar reporte')
+        el('div', { class:'field' },
+          el('label', {}, 'Prioridad'),
+          el('select', { name:'priority' },
+            el('option', { value:'low' }, 'Baja'),
+            el('option', { value:'medium', selected:true }, 'Media'),
+            el('option', { value:'high' }, 'Alta'),
+            el('option', { value:'urgent' }, '🚨 Urgente')
+          )
+        ),
+        fileInput,
+        el('button', { type:'button', class:'btn block', onclick:()=> fileInput.click() },
+          '📸 Tomar / elegir foto'),
+        preview,
+        el('button', { class:'btn lg block success', type:'submit', style:{ marginTop:'16px' } },
+          '📤 Enviar reporte')
       );
       return f;
     })()

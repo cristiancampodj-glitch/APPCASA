@@ -97,4 +97,44 @@ router.get('/:id/receipt.pdf', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/payments/next — para el inquilino: próximo pago + datos bancarios del dueño
+router.get('/next', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(`
+      SELECT p.*, h.bank_info, h.owner_whatsapp, h.name AS house_name, h.currency AS house_currency,
+             ow.full_name AS owner_name, ow.whatsapp AS owner_phone, ow.email AS owner_email
+      FROM payments p
+      JOIN houses h ON h.id = p.house_id
+      LEFT JOIN users ow ON ow.id = h.owner_id
+      WHERE p.tenant_id = $1 AND p.status IN ('pending','overdue','partial')
+      ORDER BY p.due_date ASC LIMIT 1
+    `, [req.user.id]);
+
+    // Si no hay pendientes, traer último pagado para mostrar histórico
+    if (!r.rows[0]) {
+      const last = await query(`
+        SELECT p.*, h.bank_info, h.owner_whatsapp, h.name AS house_name,
+               ow.full_name AS owner_name, ow.whatsapp AS owner_phone
+        FROM payments p
+        JOIN houses h ON h.id = p.house_id
+        LEFT JOIN users ow ON ow.id = h.owner_id
+        WHERE p.tenant_id = $1
+        ORDER BY p.paid_at DESC NULLS LAST, p.due_date DESC LIMIT 1
+      `, [req.user.id]);
+      // O datos del dueño si no hay pagos aún
+      if (!last.rows[0]) {
+        const h = await query(`
+          SELECT h.bank_info, h.owner_whatsapp, h.name AS house_name,
+                 ow.full_name AS owner_name, ow.whatsapp AS owner_phone
+          FROM houses h LEFT JOIN users ow ON ow.id = h.owner_id
+          WHERE h.id = $1
+        `, [req.user.house_id]);
+        return res.json({ payment: null, house: h.rows[0] || null });
+      }
+      return res.json({ payment: null, last_paid: last.rows[0], house: last.rows[0] });
+    }
+    res.json({ payment: r.rows[0], house: r.rows[0] });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

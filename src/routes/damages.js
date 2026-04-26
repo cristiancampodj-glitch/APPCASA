@@ -17,11 +17,11 @@ router.get('/', requireAuth, async (req, res, next) => {
 
 router.post('/', requireAuth, async (req, res, next) => {
   try {
-    const { title, description, location, priority, estimated_cost, photos = [] } = req.body;
+    const { title, description, location, priority, estimated_cost, photos = [], photo_url } = req.body;
     const r = await query(
-      `INSERT INTO damages (house_id, reported_by, title, description, location, priority, estimated_cost)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [req.user.house_id, req.user.id, title, description, location, priority || 'medium', estimated_cost]
+      `INSERT INTO damages (house_id, reported_by, title, description, location, priority, estimated_cost, photo_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [req.user.house_id, req.user.id, title, description, location, priority || 'medium', estimated_cost, photo_url || null]
     );
     for (const url of photos) {
       await query(`INSERT INTO damage_photos (damage_id, url, uploaded_by) VALUES ($1,$2,$3)`,

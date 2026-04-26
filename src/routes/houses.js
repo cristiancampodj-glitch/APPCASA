@@ -49,10 +49,11 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
     const f = req.body;
     if (!f.name) return res.status(400).json({ error: 'Falta el nombre del inmueble' });
     const r = await query(
-      `INSERT INTO houses (name, address, city, country, monthly_rent, currency, unit_label, photo_url, owner_id, status)
-       VALUES ($1,$2,$3,COALESCE($4,'CO'),$5,COALESCE($6,'COP'),$7,$8,$9,'available') RETURNING *`,
+      `INSERT INTO houses (name, address, city, country, monthly_rent, currency, unit_label, photo_url, bank_info, owner_whatsapp, owner_id, status)
+       VALUES ($1,$2,$3,COALESCE($4,'CO'),$5,COALESCE($6,'COP'),$7,$8,$9,$10,$11,'available') RETURNING *`,
       [f.name, f.address || null, f.city || null, f.country, f.monthly_rent || 0,
-       (f.currency || '').toUpperCase() || null, f.unit_label || null, f.photo_url || null, req.user.id]
+       (f.currency || '').toUpperCase() || null, f.unit_label || null, f.photo_url || null,
+       f.bank_info || null, f.owner_whatsapp || null, req.user.id]
     );
     audit(req, 'create_house', 'houses', r.rows[0].id);
     res.status(201).json({ house: r.rows[0] });
@@ -65,19 +66,22 @@ router.patch('/:id', requireAuth, requireRole('owner','admin'), async (req, res,
     const f = req.body;
     const r = await query(
       `UPDATE houses SET
-        name         = COALESCE($2, name),
-        address      = COALESCE($3, address),
-        city         = COALESCE($4, city),
-        country      = COALESCE($5, country),
-        monthly_rent = COALESCE($6, monthly_rent),
-        currency     = COALESCE($7, currency),
-        rules        = COALESCE($8, rules),
-        unit_label   = COALESCE($9, unit_label),
-        photo_url    = COALESCE($10, photo_url),
-        status       = COALESCE($11, status)
+        name           = COALESCE($2, name),
+        address        = COALESCE($3, address),
+        city           = COALESCE($4, city),
+        country        = COALESCE($5, country),
+        monthly_rent   = COALESCE($6, monthly_rent),
+        currency       = COALESCE($7, currency),
+        rules          = COALESCE($8, rules),
+        unit_label     = COALESCE($9, unit_label),
+        photo_url      = COALESCE($10, photo_url),
+        status         = COALESCE($11, status),
+        bank_info      = COALESCE($12, bank_info),
+        owner_whatsapp = COALESCE($13, owner_whatsapp)
        WHERE id = $1 RETURNING *`,
       [req.params.id, f.name, f.address, f.city, f.country, f.monthly_rent,
-       f.currency, f.rules, f.unit_label, f.photo_url, f.status]
+       f.currency, f.rules, f.unit_label, f.photo_url, f.status,
+       f.bank_info, f.owner_whatsapp]
     );
     audit(req, 'update_house', 'houses', req.params.id);
     res.json({ house: r.rows[0] });
