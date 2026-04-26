@@ -64,6 +64,11 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
 router.patch('/:id', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
   try {
     const f = req.body;
+    const day = (v) => {
+      if (v === undefined || v === null || v === '') return null;
+      const n = parseInt(v, 10);
+      return (n >= 1 && n <= 31) ? n : null;
+    };
     const r = await query(
       `UPDATE houses SET
         name           = COALESCE($2, name),
@@ -77,11 +82,19 @@ router.patch('/:id', requireAuth, requireRole('owner','admin'), async (req, res,
         photo_url      = COALESCE($10, photo_url),
         status         = COALESCE($11, status),
         bank_info      = COALESCE($12, bank_info),
-        owner_whatsapp = COALESCE($13, owner_whatsapp)
+        owner_whatsapp = COALESCE($13, owner_whatsapp),
+        rent_due_day      = COALESCE($14, rent_due_day),
+        water_due_day     = COALESCE($15, water_due_day),
+        power_due_day     = COALESCE($16, power_due_day),
+        gas_due_day       = COALESCE($17, gas_due_day),
+        internet_due_day  = COALESCE($18, internet_due_day),
+        services_notes    = COALESCE($19, services_notes)
        WHERE id = $1 RETURNING *`,
       [req.params.id, f.name, f.address, f.city, f.country, f.monthly_rent,
        f.currency, f.rules, f.unit_label, f.photo_url, f.status,
-       f.bank_info, f.owner_whatsapp]
+       f.bank_info, f.owner_whatsapp,
+       day(f.rent_due_day), day(f.water_due_day), day(f.power_due_day),
+       day(f.gas_due_day), day(f.internet_due_day), f.services_notes || null]
     );
     audit(req, 'update_house', 'houses', req.params.id);
     res.json({ house: r.rows[0] });

@@ -378,6 +378,37 @@ async function viewHouseDetail(c) {
   }
   c.append(sec1);
 
+  // 📅 Días de pago configurados
+  const dueDays = [
+    { day: h.rent_due_day,     icon:'🏠', label:'Arriendo' },
+    { day: h.water_due_day,    icon:'💧', label:'Agua' },
+    { day: h.power_due_day,    icon:'💡', label:'Luz' },
+    { day: h.gas_due_day,      icon:'🔥', label:'Gas' },
+    { day: h.internet_due_day, icon:'🌐', label:'Internet' }
+  ].filter(x => x.day);
+  const secDays = el('div', { class:'detail-section' },
+    el('h3', {}, '📅 Días de pago', el('button', {
+      class:'btn sm', style:{ marginLeft:'auto' },
+      onclick:()=> editHouse(h)
+    }, '✏️ Configurar'))
+  );
+  if (!dueDays.length) {
+    secDays.append(emptyState('📅', 'Aún no configuras días de pago. Tu inquilino los verá como recordatorio.'));
+  } else {
+    const grid = el('div', {
+      style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(120px, 1fr))', gap:'8px' }
+    });
+    dueDays.forEach(it => grid.append(el('div', {
+      style:{ padding:'10px', borderRadius:'10px', background:'var(--bg)', textAlign:'center', border:'1px solid var(--border)' }
+    },
+      el('div', { style:{ fontSize:'24px' } }, it.icon),
+      el('div', { style:{ fontSize:'13px', color:'var(--text-muted)' } }, it.label),
+      el('div', { style:{ fontSize:'20px', fontWeight:'700' } }, 'Día ' + it.day)
+    )));
+    secDays.append(grid);
+  }
+  c.append(secDays);
+
   // Pagos
   const sec2 = el('div', { class:'detail-section' },
     el('h3', {}, '💰 Pagos', el('button', {
@@ -519,6 +550,24 @@ function editHouse(h) {
           el('textarea', { name:'bank_info', rows:4,
             placeholder:'Ej:\nBancolombia – Ahorros\nN° 123-456789-00\nA nombre de Juan Pérez\nCC 12345678' }, h.bank_info || '')
         ),
+
+        // 📅 Días de pago — el inquilino los verá como recordatorios
+        el('h4', { style:{ marginTop:'18px', marginBottom:'4px' } }, '📅 Días de pago del mes'),
+        el('p', { style:{ color:'var(--text-muted)', marginTop:0, fontSize:'15px' } },
+          'Día (1-31) en que vencen el arriendo y los servicios. Déjalo vacío si no aplica.'),
+        el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:'10px' } },
+          field('rent_due_day',     '🏠 Arriendo',  'number', false, h.rent_due_day || ''),
+          field('water_due_day',    '💧 Agua',      'number', false, h.water_due_day || ''),
+          field('power_due_day',    '💡 Luz',       'number', false, h.power_due_day || ''),
+          field('gas_due_day',      '🔥 Gas',       'number', false, h.gas_due_day || ''),
+          field('internet_due_day', '🌐 Internet',  'number', false, h.internet_due_day || '')
+        ),
+        el('div', { class:'field' },
+          el('label', {}, '📝 Notas de servicios (opcional)'),
+          el('textarea', { name:'services_notes', rows:3,
+            placeholder:'Ej:\nAgua: Empresa de Acueducto, cuenta 12345\nLuz: Enel, cliente 9876' }, h.services_notes || '')
+        ),
+
         el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar'),
         el('button', { class:'btn ghost block', type:'button', style:{ marginTop:'8px' }, onclick: async () => {
           if (!confirm('¿Archivar esta propiedad?')) return;
@@ -662,8 +711,79 @@ async function viewTenantHome(c) {
       'Dueño: ' + h.owner_name + (h.owner_email ? ' · ' + h.owner_email : ''))
   ));
 
+  // 📅 Calendario de pagos del mes
+  await tenantCalendar(c);
+
   // Histórico simplificado
   await tenantHistory(c);
+}
+
+// Días de pago configurados por el dueño (arriendo + servicios)
+async function tenantCalendar(c) {
+  try {
+    const { houses } = await API.get('/api/houses');
+    const h = houses[0]; if (!h) return;
+    const items = [
+      { day: h.rent_due_day,     icon:'🏠', label:'Arriendo' },
+      { day: h.water_due_day,    icon:'💧', label:'Agua' },
+      { day: h.power_due_day,    icon:'💡', label:'Luz' },
+      { day: h.gas_due_day,      icon:'🔥', label:'Gas' },
+      { day: h.internet_due_day, icon:'🌐', label:'Internet' }
+    ].filter(x => x.day);
+    if (!items.length) return;
+
+    const today = new Date();
+    const todayDay = today.getDate();
+    const monthEnd = new Date(today.getFullYear(), today.getMonth()+1, 0).getDate();
+
+    // Calcular días faltantes
+    items.forEach(it => {
+      const d = Math.min(it.day, monthEnd);
+      it.diff = d - todayDay;          // negativo = ya pasó este mes
+      it.isToday = it.diff === 0;
+      it.label_when = it.diff === 0 ? '¡Hoy!' :
+                      it.diff > 0   ? `En ${it.diff} día${it.diff===1?'':'s'}` :
+                                      `Pasó hace ${-it.diff} día${-it.diff===1?'':'s'}`;
+    });
+    items.sort((a, b) => {
+      // Próximos primero, luego pasados
+      if (a.diff >= 0 && b.diff < 0) return -1;
+      if (a.diff < 0 && b.diff >= 0) return 1;
+      return a.diff - b.diff;
+    });
+
+    const sec = el('div', { class:'detail-section' });
+    sec.append(el('h3', {}, '📅 Fechas del mes'));
+    const grid = el('div', {
+      style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:'10px' }
+    });
+    items.forEach(it => {
+      const upcoming = it.diff >= 0;
+      const soon = it.diff >= 0 && it.diff <= 3;
+      grid.append(el('div', {
+        style:{
+          padding:'14px', borderRadius:'14px', textAlign:'center',
+          background: it.isToday ? 'var(--warning)' : (soon ? 'rgba(255,165,0,0.12)' : 'var(--bg)'),
+          color: it.isToday ? '#fff' : 'inherit',
+          opacity: upcoming ? 1 : 0.55,
+          border:'1px solid var(--border)'
+        }
+      },
+        el('div', { style:{ fontSize:'30px' } }, it.icon),
+        el('div', { style:{ fontSize:'17px', fontWeight:'700' } }, it.label),
+        el('div', { style:{ fontSize:'28px', fontWeight:'800', margin:'4px 0' } }, 'Día ' + it.day),
+        el('div', { style:{ fontSize:'14px', opacity:0.85 } }, it.label_when)
+      ));
+    });
+    sec.append(grid);
+    if (h.services_notes) {
+      sec.append(el('div', {
+        style:{ marginTop:'14px', padding:'12px', background:'var(--bg)', borderRadius:'10px',
+                whiteSpace:'pre-wrap', fontSize:'15px', color:'var(--text-muted)' }
+      }, '📝 ' + h.services_notes));
+    }
+    c.append(sec);
+  } catch {}
 }
 
 async function tenantHistory(c) {
