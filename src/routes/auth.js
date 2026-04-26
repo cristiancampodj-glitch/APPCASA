@@ -6,7 +6,7 @@ const { requireAuth, audit } = require('../middleware');
 // POST /api/auth/register — solo el primer dueño se auto-registra
 router.post('/register', async (req, res, next) => {
   try {
-    const { full_name, email, password, phone, house_name } = req.body;
+    const { full_name, email, password, phone, house_name, currency } = req.body;
     if (!full_name || !email || !password) return res.status(400).json({ error: 'Datos incompletos' });
     if (password.length < 6) return res.status(400).json({ error: 'Contraseña muy corta' });
 
@@ -16,9 +16,10 @@ router.post('/register', async (req, res, next) => {
     // Crea casa si manda house_name
     let house_id = null;
     if (house_name) {
+      const cur = ((currency || 'COP') + '').toUpperCase();
       const h = await query(
-        `INSERT INTO houses (name) VALUES ($1) RETURNING id`,
-        [house_name]
+        `INSERT INTO houses (name, currency) VALUES ($1, $2) RETURNING id`,
+        [house_name, cur]
       );
       house_id = h.rows[0].id;
     }

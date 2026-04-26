@@ -2,11 +2,12 @@
  * Mercado Pago — crear preferencia de pago
  * Funciona si MP_ACCESS_TOKEN está definido. Si no, devuelve un link "demo".
  */
-async function createPreference({ title, amount, external_reference, payer_email }) {
+async function createPreference({ title, amount, external_reference, payer_email, currency }) {
   const token = process.env.MP_ACCESS_TOKEN;
+  const cur = (currency || 'COP').toUpperCase();
   if (!token) {
     console.warn('[mp] MP_ACCESS_TOKEN no definido — devolviendo link demo');
-    return `https://example.com/pay-demo?ref=${external_reference}&amount=${amount}`;
+    return `https://example.com/pay-demo?ref=${external_reference}&amount=${amount}&cur=${cur}`;
   }
   try {
     const { MercadoPagoConfig, Preference } = require('mercadopago');
@@ -14,7 +15,7 @@ async function createPreference({ title, amount, external_reference, payer_email
     const pref = new Preference(client);
     const result = await pref.create({
       body: {
-        items: [{ title, quantity: 1, unit_price: Number(amount), currency_id: 'COP' }],
+        items: [{ title, quantity: 1, unit_price: Number(amount), currency_id: cur }],
         external_reference,
         payer: { email: payer_email },
         back_urls: {

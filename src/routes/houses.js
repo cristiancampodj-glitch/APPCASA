@@ -34,10 +34,11 @@ router.patch('/:id', requireAuth, requireRole('owner','admin'), async (req, res,
 // POST /api/houses — multi-casa
 router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
   try {
-    const { name, address, city, monthly_rent } = req.body;
+    const { name, address, city, country, monthly_rent, currency } = req.body;
     const r = await query(
-      `INSERT INTO houses (name, address, city, monthly_rent) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [name, address, city, monthly_rent || 0]
+      `INSERT INTO houses (name, address, city, country, monthly_rent, currency)
+       VALUES ($1,$2,$3,COALESCE($4,'CO'),$5,COALESCE($6,'COP')) RETURNING *`,
+      [name, address, city, country, monthly_rent || 0, (currency || '').toUpperCase() || null]
     );
     audit(req, 'create_house', 'houses', r.rows[0].id);
     res.status(201).json({ house: r.rows[0] });

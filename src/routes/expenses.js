@@ -16,11 +16,12 @@ router.get('/', requireAuth, async (req, res, next) => {
 
 router.post('/', requireAuth, async (req, res, next) => {
   try {
-    const { title, amount, category, expense_date, splits = [] } = req.body;
+    const { title, amount, category, expense_date, splits = [], currency } = req.body;
+    const cur = (currency || '').toUpperCase() || null;
     const e = await query(
-      `INSERT INTO expenses (house_id, paid_by, title, amount, category, expense_date)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [req.user.house_id, req.user.id, title, amount, category, expense_date || new Date()]
+      `INSERT INTO expenses (house_id, paid_by, title, amount, category, expense_date, currency)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,(SELECT currency FROM houses WHERE id=$1),'COP')) RETURNING *`,
+      [req.user.house_id, req.user.id, title, amount, category, expense_date || new Date(), cur]
     );
     for (const s of splits) {
       await query(

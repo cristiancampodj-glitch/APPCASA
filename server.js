@@ -47,6 +47,7 @@ app.use('/api/notifications', require('./src/routes/notifications'));
 app.use('/api/dashboard',     require('./src/routes/dashboard'));
 app.use('/api/ai',            require('./src/routes/ai'));
 app.use('/api/admin',         require('./src/routes/admin'));
+app.use('/api/currencies',    require('./src/routes/currencies'));
 
 // --- Webhooks (sin auth, validados con firma) ---
 app.use('/webhooks', require('./src/routes/webhooks'));

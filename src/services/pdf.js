@@ -3,6 +3,7 @@
  */
 const PDFDocument = require('pdfkit');
 const QRCode = require('qrcode');
+const { format: fmtMoney, normalize } = require('./currency');
 
 async function generateReceipt(stream, payment) {
   const doc = new PDFDocument({ size: 'A4', margin: 50 });
@@ -33,8 +34,9 @@ async function generateReceipt(stream, payment) {
   doc.moveDown();
 
   // Monto
+  const cur = normalize(payment.currency);
   doc.fontSize(20).fillColor('#16a34a').text(
-    `Total pagado: $${Number(payment.amount_paid || payment.amount).toLocaleString('es-CO')} COP`,
+    `Total pagado: ${fmtMoney(payment.amount_paid || payment.amount, cur)}`,
     { align: 'right' }
   );
 

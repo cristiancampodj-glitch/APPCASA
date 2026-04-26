@@ -6,6 +6,8 @@ const { requireAuth } = require('../middleware');
 router.get('/', requireAuth, async (req, res, next) => {
   try {
     const hid = req.user.house_id;
+    const houseRow = await query(`SELECT currency FROM houses WHERE id=$1`, [hid]);
+    const currency = houseRow.rows[0]?.currency || 'COP';
     const [income, overdue, occupants, damages, chores, expenses] = await Promise.all([
       query(`SELECT COALESCE(SUM(amount_paid),0)::float AS total FROM payments
              WHERE house_id=$1 AND status='paid' AND paid_at >= date_trunc('year', NOW())`, [hid]),
@@ -29,6 +31,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     `, [hid]);
 
     res.json({
+      currency,
       kpis: {
         income_year: income.rows[0].total,
         overdue_count: overdue.rows[0].c,

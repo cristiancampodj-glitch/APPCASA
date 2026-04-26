@@ -88,18 +88,48 @@ function modal(content) {
   return { close: () => back.remove() };
 }
 
-function fmtMoney(n) {
-  return '$' + Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 0 });
+function fmtMoney(n, currency) {
+  const cur = (currency || state.house?.currency || 'COP').toUpperCase();
+  const meta = {
+    COP: { locale: 'es-CO', dec: 0 },
+    EUR: { locale: 'es-ES', dec: 2 },
+    USD: { locale: 'en-US', dec: 2 },
+    MXN: { locale: 'es-MX', dec: 2 }
+  }[cur] || { locale: 'es-CO', dec: 2 };
+  try {
+    return new Intl.NumberFormat(meta.locale, {
+      style: 'currency', currency: cur,
+      minimumFractionDigits: meta.dec, maximumFractionDigits: meta.dec
+    }).format(Number(n) || 0);
+  } catch {
+    return cur + ' ' + (Number(n) || 0).toLocaleString(meta.locale);
+  }
 }
 function fmtDate(s) {
   if (!s) return '—';
   return new Date(s).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: '2-digit' });
+}
+function currencyOptions() {
+  const list = state.currencies?.length ? state.currencies : [
+    { code: 'COP', name: 'Peso Colombiano', symbol: '$' },
+    { code: 'EUR', name: 'Euro', symbol: '€' },
+    { code: 'USD', name: 'Dólar', symbol: 'US$' },
+    { code: 'MXN', name: 'Peso Mexicano', symbol: '$' }
+  ];
+  const houseCur = state.house?.currency || 'COP';
+  // pone la moneda de la casa primero
+  return list
+    .slice()
+    .sort((a, b) => (a.code === houseCur ? -1 : b.code === houseCur ? 1 : 0))
+    .map(c => ({ value: c.code, label: `${c.symbol} ${c.code} — ${c.name}` }));
 }
 
 // ============= STATE =============
 const state = {
   view: 'dashboard',
   user: null,
+  house: null,
+  currencies: [],
   theme: localStorage.getItem('theme') || 'light',
 };
 
@@ -129,6 +159,8 @@ const VIEWS = {
 
 // ============= APP RENDER =============
 async function boot() {
+  // Cargar lista de monedas (público)
+  try { state.currencies = await API.get('/api/currencies'); } catch { state.currencies = []; }
   const tk = API.token();
   if (!tk) return render();
   try {
@@ -136,6 +168,10 @@ async function boot() {
     state.user = user;
     if (user.theme) setTheme(user.theme);
     if (user.locale) I18N.locale = user.locale;
+    try {
+      const { house } = await API.get('/api/houses/mine');
+      state.house = house;
+    } catch {}
   } catch { API.setToken(null); }
   render();
 }
@@ -170,7 +206,9 @@ function renderAuth() {
       try {
         const data = await API.post('/api/auth/' + mode, fd);
         API.setToken(data.token); API.setUser(data.user);
-        state.user = data.user; render();
+        state.user = data.user;
+        try { state.house = (await API.get('/api/houses/mine')).house; } catch {}
+        render();
         toast('¡Bienvenido!', 'success');
       } catch (err) { toast(err.message, 'error'); }
     }});
@@ -179,6 +217,17 @@ function renderAuth() {
       form.append(field('full_name', t('name'), 'text', true));
       form.append(field('house_name', t('house_name') + ' (opcional, si eres dueño)', 'text', false));
       form.append(field('phone', t('phone'), 'tel', false));
+      // Selector de moneda
+      const curOpts = (state.currencies.length ? state.currencies : [
+        { code: 'COP', name: 'Peso Colombiano', symbol: '$' },
+        { code: 'EUR', name: 'Euro', symbol: '€' },
+        { code: 'USD', name: 'Dólar', symbol: 'US$' }
+      ]);
+      const sel = el('select', { name: 'currency' });
+      curOpts.forEach(c => sel.append(el('option', { value: c.code }, `${c.symbol} ${c.code} — ${c.name}`)));
+      form.append(el('div', { class: 'field' },
+        el('label', {}, 'Moneda principal'), sel
+      ));
     }
     form.append(field('email', t('email'), 'email', true));
     form.append(field('password', t('password'), 'password', true));
@@ -268,10 +317,11 @@ async function viewDashboard(c) {
   c.append(el('div', { class: 'kpi-grid', id: 'kpis' }, skeleton(4)));
   const data = await API.get('/api/dashboard');
   const k = data.kpis;
+  const cur = data.currency;
   $('#kpis', c).replaceWith(el('div', { class: 'kpi-grid' },
-    kpiCard('Ingresos año', fmtMoney(k.income_year), 'success'),
-    kpiCard('Mora total', fmtMoney(k.overdue_amount), 'danger', `${k.overdue_count} pagos vencidos`),
-    kpiCard('Gastos mes', fmtMoney(k.expenses_month), 'warning'),
+    kpiCard('Ingresos año', fmtMoney(k.income_year, cur), 'success'),
+    kpiCard('Mora total', fmtMoney(k.overdue_amount, cur), 'danger', `${k.overdue_count} pagos vencidos`),
+    kpiCard('Gastos mes', fmtMoney(k.expenses_month, cur), 'warning'),
     kpiCard('Ocupantes', k.occupants, ''),
     kpiCard('Daños activos', k.active_damages, k.active_damages > 0 ? 'warning' : ''),
     kpiCard('Turnos pendientes', k.pending_chores, '')
@@ -321,7 +371,7 @@ async function viewPayments(c) {
     const item = el('div', { class: 'list-item' },
       el('div', {},
         el('div', { style: { fontWeight: 600 } }, `Arriendo ${p.period_month}/${p.period_year} — ${p.tenant_name || ''}`),
-        el('div', { class: 'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount)}`)
+        el('div', { class: 'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`)
       ),
       el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
         el('span', { class: 'badge ' + status }, p.status),
@@ -343,6 +393,7 @@ function openCreatePayment() {
       { name: 'period_month', label: 'Mes', type: 'number', required: true },
       { name: 'period_year', label: 'Año', type: 'number', required: true },
       { name: 'amount', label: 'Monto', type: 'number', required: true },
+      { name: 'currency', label: 'Moneda', type: 'select', options: currencyOptions(), required: true },
       { name: 'due_date', label: 'Vencimiento', type: 'date', required: true }
     ], async (data) => {
       await API.post('/api/payments', data);
@@ -463,6 +514,7 @@ async function viewExpenses(c) {
   c.append(el('button', { class: 'btn', onclick: () => crudModal('Nuevo gasto', '/api/expenses', [
     { name: 'title', label: 'Título', required: true },
     { name: 'amount', label: 'Monto', type: 'number', required: true },
+    { name: 'currency', label: 'Moneda', type: 'select', options: currencyOptions(), required: true },
     { name: 'category', label: 'Categoría' },
     { name: 'expense_date', label: 'Fecha', type: 'date' }
   ]) }, '+ Gasto'));
@@ -474,7 +526,7 @@ async function viewExpenses(c) {
       el('div', { style: { fontWeight: 600 } }, e.title),
       el('div', { class: 'meta' }, `${e.payer_name} · ${e.category || ''} · ${fmtDate(e.expense_date)}`)
     ),
-    el('div', { style: { fontWeight: 700 } }, fmtMoney(e.amount))
+    el('div', { style: { fontWeight: 700 } }, fmtMoney(e.amount, e.currency))
   )));
   c.append(list);
 }

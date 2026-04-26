@@ -29,13 +29,14 @@ router.get('/', requireAuth, async (req, res, next) => {
 // POST /api/payments — owner genera cobro
 router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
   try {
-    const { contract_id, tenant_id, period_month, period_year, amount, due_date, notes } = req.body;
+    const { contract_id, tenant_id, period_month, period_year, amount, due_date, notes, currency } = req.body;
+    const cur = (currency || '').toUpperCase() || null; // null deja al trigger heredar de la casa
     const r = await query(
-      `INSERT INTO payments (contract_id, tenant_id, house_id, period_month, period_year, amount, due_date, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       ON CONFLICT (contract_id, period_month, period_year) DO UPDATE SET amount = EXCLUDED.amount
+      `INSERT INTO payments (contract_id, tenant_id, house_id, period_month, period_year, amount, due_date, notes, currency)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, (SELECT currency FROM houses WHERE id=$3), 'COP'))
+       ON CONFLICT (contract_id, period_month, period_year) DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency
        RETURNING *`,
-      [contract_id, tenant_id, req.user.house_id, period_month, period_year, amount, due_date, notes || null]
+      [contract_id, tenant_id, req.user.house_id, period_month, period_year, amount, due_date, notes || null, cur]
     );
     audit(req, 'create_payment', 'payments', r.rows[0].id);
     res.status(201).json({ payment: r.rows[0] });
@@ -51,6 +52,7 @@ router.post('/:id/checkout', requireAuth, async (req, res, next) => {
     const link = await mp.createPreference({
       title: `Arriendo ${p.period_month}/${p.period_year}`,
       amount: Number(p.amount),
+      currency: p.currency || 'COP',
       external_reference: p.id,
       payer_email: req.user.email
     });
