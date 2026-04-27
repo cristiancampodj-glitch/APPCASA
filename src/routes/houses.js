@@ -137,7 +137,13 @@ router.delete('/:id', requireAuth, requireRole('owner','admin'), async (req, res
 // POST /api/houses/:id/invite-tenant — añadir inquilino al apartamento
 router.post('/:id/invite-tenant', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
   try {
-    const { full_name, email, phone, password } = req.body;
+    const {
+      full_name, email, phone, password,
+      // KYC
+      national_id, national_id_url,
+      employment_type, monthly_income, income_docs_url,
+      credit_clean, rental_study_paid, rental_study_amount
+    } = req.body;
     if (!full_name || !email || !password)
       return res.status(400).json({ error: 'Falta nombre, email o contraseña' });
 
@@ -150,11 +156,33 @@ router.post('/:id/invite-tenant', requireAuth, requireRole('owner','admin'), asy
     const exists = await query('SELECT id FROM users WHERE email=$1', [email]);
     if (exists.rows[0]) return res.status(409).json({ error: 'Ese email ya tiene cuenta' });
 
+    // Limitar tamaño de archivos en data URL (max ~6MB cada uno)
+    for (const [k, v] of Object.entries({ national_id_url, income_docs_url })) {
+      if (v && typeof v === 'string' && v.length > 8_000_000) {
+        return res.status(413).json({ error: `Archivo demasiado grande: ${k}` });
+      }
+    }
+
     const password_hash = await hash(password);
     const u = await query(
-      `INSERT INTO users (house_id, full_name, email, phone, password_hash, role)
-       VALUES ($1,$2,$3,$4,$5,'tenant') RETURNING id, full_name, email, role, house_id`,
-      [req.params.id, full_name, email, phone || null, password_hash]
+      `INSERT INTO users (
+         house_id, full_name, email, phone, password_hash, role,
+         national_id, national_id_url,
+         employment_type, monthly_income, income_docs_url,
+         credit_clean, rental_study_paid, rental_study_amount
+       )
+       VALUES ($1,$2,$3,$4,$5,'tenant',$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING id, full_name, email, role, house_id`,
+      [
+        req.params.id, full_name, email, phone || null, password_hash,
+        national_id || null, national_id_url || null,
+        employment_type || null,
+        monthly_income ? Number(monthly_income) : null,
+        income_docs_url || null,
+        typeof credit_clean === 'boolean' ? credit_clean : null,
+        !!rental_study_paid,
+        rental_study_amount ? Number(rental_study_amount) : null
+      ]
     );
     await query(`UPDATE houses SET status='occupied' WHERE id=$1`, [req.params.id]);
     audit(req, 'invite_tenant', 'users', u.rows[0].id);

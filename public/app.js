@@ -711,15 +711,55 @@ function openManageTenant(tenant, house) {
 
 // ===================== INVITAR INQUILINO =====================
 function openInviteTenant(houseId) {
+  // Almacenamos los archivos cargados aquí
+  const docs = { national_id_url: null, income_docs_url: null };
+
+  // Helper: input de archivo que guarda dataURL en `docs[key]`
+  function fileField(key, labelText, accept) {
+    const status = el('div', { class:'meta', style:{ marginTop:'4px' } }, 'Sin archivo');
+    const inp = el('input', { type:'file', accept: accept || 'image/*,application/pdf' });
+    inp.addEventListener('change', () => {
+      const file = inp.files[0]; if (!file) return;
+      if (file.size > 6 * 1024 * 1024) { toast('Archivo muy grande (máx 6 MB)', 'error'); inp.value = ''; return; }
+      const reader = new FileReader();
+      reader.onload = e => {
+        docs[key] = e.target.result;
+        status.textContent = '✅ ' + file.name + ' · ' + Math.round(file.size/1024) + ' KB';
+      };
+      reader.readAsDataURL(file);
+    });
+    return el('div', { class:'field' }, el('label', {}, labelText), inp, status);
+  }
+
+  // Sección de ingresos según tipo de empleo
+  const incomeHelp = el('p', { class:'meta', style:{ marginTop:'4px' } },
+    'Selecciona el tipo de actividad para ver qué documento adjuntar.');
+  const incomeDocLabel = el('label', {}, '📎 Soporte de ingresos');
+
   const m = modal(el('div', {},
     el('h3', {}, '👤 Añadir inquilino'),
-    el('p', { style:{ color:'var(--text-muted)', marginBottom:'16px' } }, 'Le crearemos una cuenta. Comparte estos datos con tu inquilino.'),
+    el('p', { style:{ color:'var(--text-muted)', marginBottom:'12px' } },
+      'Le crearemos una cuenta y guardaremos los soportes del estudio de arrendamiento.'),
     (() => {
       const f = el('form', { onsubmit: async (e) => {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
+        // Validación: ingresos > 2x canon (informativo, lo valida el dueño)
         try {
-          const r = await API.post(`/api/houses/${houseId}/invite-tenant`, data);
+          const r = await API.post(`/api/houses/${houseId}/invite-tenant`, {
+            full_name: data.full_name,
+            email: data.email,
+            phone: data.phone,
+            password: data.password,
+            national_id: data.national_id,
+            employment_type: data.employment_type,
+            monthly_income: data.monthly_income ? Number(data.monthly_income) : null,
+            credit_clean: data.credit_clean === 'on',
+            rental_study_paid: data.rental_study_paid === 'on',
+            rental_study_amount: data.rental_study_amount ? Number(data.rental_study_amount) : null,
+            national_id_url: docs.national_id_url,
+            income_docs_url: docs.income_docs_url
+          });
           m.close();
           toast('Inquilino añadido ✅', 'success');
           showCredentialsModal({
@@ -731,13 +771,74 @@ function openInviteTenant(houseId) {
           render();
         } catch (err) { toast(err.message, 'error'); }
       }});
-      f.append(
+
+      // ----- Datos básicos -----
+      const basic = el('div', {},
+        el('h4', { style:{ marginTop:'4px' } }, '📋 Datos personales'),
         field('full_name', 'Nombre completo', 'text', true),
-        field('email', 'Correo del inquilino', 'email', true),
-        field('phone', 'Teléfono', 'tel'),
+        field('national_id', 'Número de cédula', 'text', true),
+        field('email', 'Correo electrónico', 'email', true),
+        field('phone', 'Teléfono / WhatsApp', 'tel'),
         field('password', 'Contraseña que tendrá (mín 6)', 'text', true),
-        el('button', { class:'btn lg block', type:'submit' }, '✅ Crear cuenta del inquilino')
+        fileField('national_id_url', '📎 Fotocopia de la cédula (imagen o PDF)')
       );
+
+      // ----- Ingresos -----
+      const incomeSel = el('select', { name:'employment_type', required:true,
+        onchange: () => {
+          const v = incomeSel.value;
+          if (v === 'employee') {
+            incomeDocLabel.textContent = '📎 Carta laboral + colillas de pago';
+            incomeHelp.textContent = 'Adjunta carta laboral y últimas colillas (PDF o imagen).';
+          } else if (v === 'independent') {
+            incomeDocLabel.textContent = '📎 RUT + extractos bancarios';
+            incomeHelp.textContent = 'Adjunta RUT y extractos bancarios de los últimos meses.';
+          } else {
+            incomeDocLabel.textContent = '📎 Soporte de ingresos';
+            incomeHelp.textContent = 'Selecciona el tipo de actividad.';
+          }
+        }
+      },
+        el('option', { value:'' }, 'Selecciona...'),
+        el('option', { value:'employee' }, 'Empleado'),
+        el('option', { value:'independent' }, 'Independiente')
+      );
+
+      const incomeFile = el('input', { type:'file', accept:'image/*,application/pdf' });
+      incomeFile.addEventListener('change', () => {
+        const file = incomeFile.files[0]; if (!file) return;
+        if (file.size > 6 * 1024 * 1024) { toast('Archivo muy grande (máx 6 MB)', 'error'); incomeFile.value = ''; return; }
+        const reader = new FileReader();
+        reader.onload = e => {
+          docs.income_docs_url = e.target.result;
+          incomeHelp.textContent = '✅ ' + file.name + ' · ' + Math.round(file.size/1024) + ' KB';
+        };
+        reader.readAsDataURL(file);
+      });
+
+      const income = el('div', {},
+        el('h4', {}, '💼 Ingresos (mín 2× canon)'),
+        el('div', { class:'field' }, el('label', {}, 'Tipo de actividad'), incomeSel),
+        field('monthly_income', 'Ingreso mensual estimado', 'number', false),
+        el('div', { class:'field' }, incomeDocLabel, incomeFile, incomeHelp)
+      );
+
+      // ----- Centrales de riesgo + estudio -----
+      const checks = el('div', {},
+        el('h4', {}, '✅ Requisitos legales'),
+        el('label', { class:'check', style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'8px' } },
+          el('input', { type:'checkbox', name:'credit_clean' }),
+          'Declaro NO tener reportes negativos en centrales de riesgo (Datacrédito / TransUnion).'),
+        el('label', { class:'check', style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'8px' } },
+          el('input', { type:'checkbox', name:'rental_study_paid' }),
+          'El inquilino pagó el estudio de arrendamiento.'),
+        field('rental_study_amount', 'Monto del estudio (opcional)', 'number'),
+        el('p', { class:'meta' },
+          'ℹ️ El codeudor (fiador) se registra al crear el contrato.')
+      );
+
+      f.append(basic, el('hr'), income, el('hr'), checks,
+        el('button', { class:'btn lg block', type:'submit', style:{ marginTop:'14px' } }, '✅ Crear cuenta del inquilino'));
       return f;
     })()
   ));
@@ -985,12 +1086,17 @@ async function viewTenantHome(c) {
 
   if (p) {
     const isOverdue = p.status === 'overdue' || (new Date(p.due_date) < new Date());
+    const hasLateFee = (p.late_fee_preview || 0) > 0;
+    const baseAmount = Number(p.base_amount || p.amount);
+    const totalAmount = Number(p.current_amount || p.amount);
     banner.append(
       el('div', { style:{ textAlign:'center', padding:'20px 8px' } },
         el('div', { style:{ fontSize:'18px', color:'var(--text-muted)', marginBottom:'8px' } },
           isOverdue ? '⚠️ Tienes un pago vencido' : 'Tu próximo pago'),
         el('div', { style:{ fontSize:'56px', fontWeight:'800', color: isOverdue ? 'var(--danger)' : 'var(--primary)', lineHeight:'1.1' } },
-          fmtMoney(p.amount, cur)),
+          fmtMoney(totalAmount, cur)),
+        hasLateFee && el('div', { style:{ marginTop:'10px', padding:'8px 12px', background:'var(--danger-bg, #fee2e2)', color:'var(--danger)', borderRadius:'10px', display:'inline-block', fontSize:'14px' } },
+          `🚨 Mora: ${p.days_late} días · Canon ${fmtMoney(baseAmount, cur)} + intereses ${fmtMoney(p.late_fee_preview, cur)}`),
         el('div', { style:{ fontSize:'18px', color:'var(--text-muted)', marginTop:'8px' } },
           'Vence ' + fmtDate(p.due_date) + ' · ' + p.period_month + '/' + p.period_year)
       )
@@ -1129,11 +1235,17 @@ async function tenantHistory(c) {
 function showPayInfo(p, h, cur) {
   if (!p) return toast('No tienes pagos pendientes ✅', 'success');
 
+  const totalAmount = Number(p.current_amount || p.amount);
+  const baseAmount = Number(p.base_amount || p.amount);
+  const lateFee = Number(p.late_fee_preview || 0);
+
   const m = modal(el('div', {},
     el('h3', {}, '💳 Pagar arriendo'),
     el('div', { style:{ textAlign:'center', padding:'10px 0 20px' } },
       el('div', { style:{ color:'var(--text-muted)' } }, 'Total a pagar'),
-      el('div', { style:{ fontSize:'42px', fontWeight:'800', color:'var(--primary)' } }, fmtMoney(p.amount, cur))
+      el('div', { style:{ fontSize:'42px', fontWeight:'800', color:'var(--primary)' } }, fmtMoney(totalAmount, cur)),
+      lateFee > 0 && el('div', { style:{ marginTop:'8px', fontSize:'13px', color:'var(--danger)' } },
+        `Canon ${fmtMoney(baseAmount, cur)} + intereses por mora ${fmtMoney(lateFee, cur)} (${p.days_late} días)`)
     ),
 
     // Botón: pago en línea
@@ -1159,7 +1271,7 @@ function showPayInfo(p, h, cur) {
 
     el('hr'),
     el('button', { class:'btn ghost block', onclick: () => {
-      const txt = `Hola${h.owner_name ? ' '+h.owner_name.split(' ')[0] : ''}, ya hice la transferencia del arriendo de ${fmtMoney(p.amount, cur)} (${p.period_month}/${p.period_year}). Por favor confírmame cuando te llegue.`;
+      const txt = `Hola${h.owner_name ? ' '+h.owner_name.split(' ')[0] : ''}, ya hice la transferencia del arriendo de ${fmtMoney(totalAmount, cur)} (${p.period_month}/${p.period_year}). Por favor confírmame cuando te llegue.`;
       const phone = (h.owner_whatsapp || h.owner_phone || '').replace(/\D/g,'');
       if (!phone) return toast('El dueño no tiene WhatsApp configurado', 'error');
       window.open(`https://wa.me/${phone}?text=${encodeURIComponent(txt)}`, '_blank');
@@ -1908,13 +2020,22 @@ CLÁUSULAS:
   const f = el('form', { onsubmit: async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(f));
+    const extras = {
+      grace_days: data.grace_days ? Number(data.grace_days) : undefined,
+      late_fee_monthly_rate: data.late_fee_monthly_rate ? Number(data.late_fee_monthly_rate) : undefined,
+      guarantor_name: data.guarantor_name || null,
+      guarantor_national_id: data.guarantor_national_id || null,
+      guarantor_phone: data.guarantor_phone || null,
+      guarantor_email: data.guarantor_email || null
+    };
     try {
       let contract;
       if (existing) {
         const r = await API.patch(`/api/contracts/${existing.id}`, {
           body_text: data.body_text,
           monthly_rent: data.monthly_rent ? Number(data.monthly_rent) : undefined,
-          end_date: data.end_date || null
+          end_date: data.end_date || null,
+          ...extras
         });
         contract = r.contract;
       } else {
@@ -1926,7 +2047,8 @@ CLÁUSULAS:
           monthly_rent: Number(data.monthly_rent) || Number(house.monthly_rent) || 0,
           deposit: Number(data.deposit) || 0,
           payment_day: Number(data.payment_day) || house.rent_due_day || 5,
-          body_text: data.body_text
+          body_text: data.body_text,
+          ...extras
         });
         contract = r.contract;
       }
@@ -1942,6 +2064,19 @@ CLÁUSULAS:
       field('monthly_rent', 'Canon mensual', 'number', false, existing?.monthly_rent || house.monthly_rent || ''),
       field('deposit', 'Depósito', 'number', false, existing?.deposit || ''),
       field('payment_day', 'Día de pago', 'number', false, existing?.payment_day || house.rent_due_day || 5)
+    ),
+    el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'10px', marginTop:'8px' } },
+      field('grace_days', 'Días de gracia (mora)', 'number', false, existing?.grace_days ?? 3),
+      field('late_fee_monthly_rate', 'Interés mensual (ej. 0.02 = 2%)', 'number', false,
+        existing?.late_fee_monthly_rate ?? 0.02)
+    ),
+    el('hr', { style:{ borderColor:'var(--border)', margin:'10px 0' } }),
+    el('h4', { style:{ margin:'4px 0' } }, '🤝 Codeudor / Fiador'),
+    el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'10px' } },
+      field('guarantor_name', 'Nombre del codeudor', 'text', false, existing?.guarantor_name || ''),
+      field('guarantor_national_id', 'Cédula', 'text', false, existing?.guarantor_national_id || ''),
+      field('guarantor_phone', 'Teléfono', 'tel', false, existing?.guarantor_phone || ''),
+      field('guarantor_email', 'Correo', 'email', false, existing?.guarantor_email || '')
     ),
     el('div', { class:'field' }, el('label', {}, 'Cuerpo del contrato'), ta),
     el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar contrato')

@@ -57,7 +57,10 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
   try {
     const {
       house_id, tenant_id, start_date, end_date,
-      monthly_rent, deposit, payment_day, body_text, notes
+      monthly_rent, deposit, payment_day, body_text, notes,
+      grace_days, late_fee_monthly_rate,
+      guarantor_name, guarantor_national_id, guarantor_phone, guarantor_email,
+      guarantor_id_url, guarantor_income_url
     } = req.body;
 
     if (!house_id || !tenant_id || !start_date || !monthly_rent) {
@@ -74,11 +77,19 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
 
     const r = await query(
       `INSERT INTO contracts
-        (house_id, tenant_id, start_date, end_date, monthly_rent, deposit, payment_day, body_text, notes, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active')
+        (house_id, tenant_id, start_date, end_date, monthly_rent, deposit, payment_day, body_text, notes, status,
+         grace_days, late_fee_monthly_rate,
+         guarantor_name, guarantor_national_id, guarantor_phone, guarantor_email,
+         guarantor_id_url, guarantor_income_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,$12,$13,$14,$15,$16,$17)
        RETURNING *`,
       [house_id, tenant_id, start_date, end_date || null, monthly_rent,
-       deposit || 0, payment_day || 5, body_text || null, notes || null]
+       deposit || 0, payment_day || 5, body_text || null, notes || null,
+       grace_days != null ? Number(grace_days) : 3,
+       late_fee_monthly_rate != null ? Number(late_fee_monthly_rate) : 0.02,
+       guarantor_name || null, guarantor_national_id || null,
+       guarantor_phone || null, guarantor_email || null,
+       guarantor_id_url || null, guarantor_income_url || null]
     );
     audit(req, 'create_contract', 'contracts', r.rows[0].id);
     res.status(201).json({ contract: r.rows[0] });
@@ -88,7 +99,12 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
 // PATCH /api/contracts/:id — actualizar cuerpo / datos
 router.patch('/:id', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
   try {
-    const { body_text, notes, end_date, monthly_rent, deposit, payment_day, status } = req.body;
+    const {
+      body_text, notes, end_date, monthly_rent, deposit, payment_day, status,
+      grace_days, late_fee_monthly_rate,
+      guarantor_name, guarantor_national_id, guarantor_phone, guarantor_email,
+      guarantor_id_url, guarantor_income_url
+    } = req.body;
     // Verificar acceso
     const cur = await query(
       `SELECT c.*, h.owner_id FROM contracts c JOIN houses h ON h.id = c.house_id WHERE c.id = $1`,
@@ -102,16 +118,28 @@ router.patch('/:id', requireAuth, requireRole('owner','admin'), async (req, res,
 
     const r = await query(
       `UPDATE contracts SET
-         body_text    = COALESCE($2, body_text),
-         notes        = COALESCE($3, notes),
-         end_date     = COALESCE($4, end_date),
-         monthly_rent = COALESCE($5, monthly_rent),
-         deposit      = COALESCE($6, deposit),
-         payment_day  = COALESCE($7, payment_day),
-         status       = COALESCE($8, status)
+         body_text             = COALESCE($2,  body_text),
+         notes                 = COALESCE($3,  notes),
+         end_date              = COALESCE($4,  end_date),
+         monthly_rent          = COALESCE($5,  monthly_rent),
+         deposit               = COALESCE($6,  deposit),
+         payment_day           = COALESCE($7,  payment_day),
+         status                = COALESCE($8,  status),
+         grace_days            = COALESCE($9,  grace_days),
+         late_fee_monthly_rate = COALESCE($10, late_fee_monthly_rate),
+         guarantor_name        = COALESCE($11, guarantor_name),
+         guarantor_national_id = COALESCE($12, guarantor_national_id),
+         guarantor_phone       = COALESCE($13, guarantor_phone),
+         guarantor_email       = COALESCE($14, guarantor_email),
+         guarantor_id_url      = COALESCE($15, guarantor_id_url),
+         guarantor_income_url  = COALESCE($16, guarantor_income_url)
        WHERE id = $1
        RETURNING *`,
-      [req.params.id, body_text, notes, end_date, monthly_rent, deposit, payment_day, status]
+      [req.params.id, body_text, notes, end_date, monthly_rent, deposit, payment_day, status,
+       grace_days != null ? Number(grace_days) : null,
+       late_fee_monthly_rate != null ? Number(late_fee_monthly_rate) : null,
+       guarantor_name, guarantor_national_id, guarantor_phone, guarantor_email,
+       guarantor_id_url, guarantor_income_url]
     );
     audit(req, 'update_contract', 'contracts', r.rows[0].id);
     res.json({ contract: r.rows[0] });

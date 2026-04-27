@@ -73,8 +73,8 @@ async function step2GenerateNextRentPayments() {
 
     try {
       const ins = await query(
-        `INSERT INTO payments (contract_id, tenant_id, house_id, period_month, period_year, amount, due_date, currency, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')
+        `INSERT INTO payments (contract_id, tenant_id, house_id, period_month, period_year, amount, base_amount, due_date, currency, status)
+         VALUES ($1,$2,$3,$4,$5,$6,$6,$7,$8,'pending')
          ON CONFLICT (contract_id, period_month, period_year) DO NOTHING
          RETURNING id`,
         [c.id, c.tenant_id, c.house_id, nextMonth, nextYear, c.monthly_rent, dueDate, c.currency || 'COP']
