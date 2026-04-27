@@ -31,15 +31,15 @@ router.get('/stream', async (req, res, next) => {
       'X-Accel-Buffering': 'no'
     });
     res.flushHeaders && res.flushHeaders();
-    res.write('retry: 5000\n\n');
+    res.write('retry: 2000\n\n');
     res.write(`data: ${JSON.stringify({ type:'hello', ts: Date.now() })}\n\n`);
 
     subscribe(userId, res);
 
-    // Heartbeat para que proxies no cierren la conexión
+    // Heartbeat para que proxies no cierren la conexión (cada 15s)
     const ping = setInterval(() => {
       try { res.write(': ping\n\n'); } catch {}
-    }, 25000);
+    }, 15000);
     req.on('close', () => clearInterval(ping));
   } catch (e) { next(e); }
 });

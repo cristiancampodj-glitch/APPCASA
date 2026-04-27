@@ -199,9 +199,10 @@ function connectRealtime() {
   es.onerror = () => {
     try { es.close(); } catch {}
     _sse = null;
-    // Reintento exponencial con tope
-    _sseRetry = Math.min(_sseRetry + 1, 6);
-    setTimeout(connectRealtime, 1000 * Math.pow(2, _sseRetry));
+    // Reintento rápido: 0.5s, 1s, 2s, 4s, máximo 5s
+    _sseRetry = Math.min(_sseRetry + 1, 4);
+    const delay = Math.min(500 * Math.pow(2, _sseRetry - 1), 5000);
+    setTimeout(connectRealtime, delay);
   };
 }
 
