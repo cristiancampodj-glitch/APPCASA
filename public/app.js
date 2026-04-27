@@ -1308,55 +1308,121 @@ async function openCreateBill() {
   const now = new Date();
   let split = 'equal';
 
-  // Mapa de checks y inputs por casa
+  // Mapa de checks y filas. La fila muestra monto como TEXTO en equal,
+  // o como INPUT en custom. Nunca tocamos otros campos del modal.
   const houseRows = houses.map(h => {
-    const cb = el('input', { type:'checkbox', name:'house_'+h.id, checked:true, value:h.id });
-    const amt = el('input', { type:'number', step:'0.01', name:'amount_'+h.id, placeholder:'0', style:{ width:'140px' } });
-    const row = el('div', {
+    const cb = el('input', { type:'checkbox', value:h.id });
+    cb.checked = true;
+    const amtView = el('div', { style:{ width:'140px', textAlign:'right', fontWeight:'700' } }, '—');
+    const amtInput = el('input', { type:'number', step:'0.01', placeholder:'0', style:{ width:'140px' } });
+    const slot = el('div', { style:{ width:'140px', display:'flex', justifyContent:'flex-end' } }, amtView);
+
+    const row = el('label', {
       style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 10px',
-              background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }
+              background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)',
+              cursor:'pointer' }
     },
       cb,
       el('div', { style:{ flex:1 } }, el('b', {}, h.name), el('div', { class:'meta' }, h.address || '')),
-      amt
+      slot
     );
-    return { house: h, cb, amt, row };
+    return { house: h, cb, amtView, amtInput, slot, row };
   });
 
   const splitInfo = el('div', { class:'meta', style:{ marginTop:'4px' } });
+  const totalInput = el('input', { name:'total_amount', type:'number', step:'0.01', required:true, placeholder:'0' });
 
-  function refreshSplit(total) {
+  function getTotal() { return Number(totalInput.value) || 0; }
+
+  function showEqualPreview() {
     const checked = houseRows.filter(r => r.cb.checked);
+    const total = getTotal();
+    if (!checked.length) { houseRows.forEach(r => r.amtView.textContent = '—'); splitInfo.textContent = 'Selecciona al menos 1 propiedad.'; return; }
+    if (!total) { houseRows.forEach(r => r.amtView.textContent = '—'); splitInfo.textContent = 'Ingresa el total para previsualizar.'; return; }
+    const per = Math.round((total / checked.length) * 100) / 100;
+    checked.forEach((r, i) => {
+      const v = (i === checked.length - 1)
+        ? Math.round((total - per * (checked.length - 1)) * 100) / 100
+        : per;
+      r.amtView.textContent = fmtMoney(v);
+    });
+    houseRows.filter(r => !r.cb.checked).forEach(r => r.amtView.textContent = '—');
+    splitInfo.textContent = `División equitativa entre ${checked.length} propiedad${checked.length>1?'es':''}.`;
+  }
+
+  function showCustomSum() {
+    const sum = houseRows.filter(r => r.cb.checked)
+      .reduce((a, r) => a + (Number(r.amtInput.value) || 0), 0);
+    splitInfo.textContent = `Suma actual: ${fmtMoney(sum)} / Total: ${fmtMoney(getTotal())}`;
+  }
+
+  function applySplitMode() {
     if (split === 'equal') {
-      houseRows.forEach(r => r.amt.disabled = true);
-      if (!checked.length || !total) {
-        splitInfo.textContent = '';
-        return;
-      }
-      const per = Math.round((total / checked.length) * 100) / 100;
-      checked.forEach((r, i) => {
-        r.amt.value = (i === checked.length - 1)
-          ? (Math.round((total - per * (checked.length - 1)) * 100) / 100).toFixed(2)
-          : per.toFixed(2);
+      houseRows.forEach(r => {
+        r.slot.innerHTML = '';
+        r.slot.append(r.amtView);
       });
-      houseRows.filter(r => !r.cb.checked).forEach(r => r.amt.value = '');
-      splitInfo.textContent = `División equitativa entre ${checked.length} propiedad${checked.length>1?'es':''}.`;
+      showEqualPreview();
     } else {
-      houseRows.forEach(r => r.amt.disabled = !r.cb.checked);
-      const sum = checked.reduce((a, r) => a + (Number(r.amt.value) || 0), 0);
-      splitInfo.textContent = `Suma actual: ${fmtMoney(sum)} / Total: ${fmtMoney(total||0)}`;
+      houseRows.forEach(r => {
+        r.slot.innerHTML = '';
+        r.slot.append(r.amtInput);
+        r.amtInput.disabled = !r.cb.checked;
+      });
+      showCustomSum();
     }
   }
+
+  totalInput.addEventListener('input', () => {
+    if (split === 'equal') showEqualPreview(); else showCustomSum();
+  });
+  houseRows.forEach(r => {
+    r.cb.addEventListener('change', () => {
+      if (split === 'equal') showEqualPreview();
+      else { r.amtInput.disabled = !r.cb.checked; showCustomSum(); }
+    });
+    r.amtInput.addEventListener('input', () => { if (split === 'custom') showCustomSum(); });
+  });
+
+  const btnEqual = el('button', { type:'button', class:'btn sm success' }, '⚖️ Dividir igual');
+  const btnCustom = el('button', { type:'button', class:'btn sm ghost' }, '✍️ Personalizado');
+  btnEqual.addEventListener('click', () => {
+    split = 'equal';
+    btnEqual.classList.remove('ghost'); btnEqual.classList.add('success');
+    btnCustom.classList.remove('success'); btnCustom.classList.add('ghost');
+    applySplitMode();
+  });
+  btnCustom.addEventListener('click', () => {
+    split = 'custom';
+    btnCustom.classList.remove('ghost'); btnCustom.classList.add('success');
+    btnEqual.classList.remove('success'); btnEqual.classList.add('ghost');
+    applySplitMode();
+  });
+  const splitSel = el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' } }, btnEqual, btnCustom);
+
+  const typeSel = el('select', { name:'type', required:true });
+  UTIL_TYPES.forEach(t => typeSel.append(el('option', { value:t.v }, `${t.icon} ${t.label}`)));
 
   const f = el('form', { onsubmit: async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(f));
     const total = Number(data.total_amount);
-    const shares = houseRows.filter(r => r.cb.checked).map(r => ({
-      house_id: r.house.id,
-      amount: Number(r.amt.value) || 0
-    }));
-    if (!shares.length) return toast('Selecciona al menos una propiedad', 'error');
+    const checked = houseRows.filter(r => r.cb.checked);
+    if (!checked.length) return toast('Selecciona al menos una propiedad', 'error');
+
+    let shares;
+    if (split === 'equal') {
+      const per = Math.round((total / checked.length) * 100) / 100;
+      shares = checked.map((r, i) => ({
+        house_id: r.house.id,
+        amount: i === checked.length - 1
+          ? Math.round((total - per * (checked.length - 1)) * 100) / 100
+          : per
+      }));
+    } else {
+      shares = checked.map(r => ({ house_id: r.house.id, amount: Number(r.amtInput.value) || 0 }));
+    }
+
     try {
       await API.post('/api/utility-bills', {
         type: data.type,
@@ -1372,33 +1438,6 @@ async function openCreateBill() {
       m.close(); toast('Recibo creado ✅', 'success'); render();
     } catch (err) { toast(err.message, 'error'); }
   }});
-
-  const totalInput = el('input', { name:'total_amount', type:'number', step:'0.01', required:true, placeholder:'0' });
-  totalInput.addEventListener('input', () => refreshSplit(Number(totalInput.value)));
-  houseRows.forEach(r => {
-    r.cb.addEventListener('change', () => refreshSplit(Number(totalInput.value)));
-    r.amt.addEventListener('input', () => { if (split === 'custom') refreshSplit(Number(totalInput.value)); });
-  });
-
-  const splitSel = el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' } },
-    el('button', { type:'button', class:'btn sm success', onclick: (e) => {
-      split = 'equal';
-      e.target.classList.remove('ghost'); e.target.classList.add('success');
-      const other = e.target.nextElementSibling;
-      other.classList.remove('success'); other.classList.add('ghost');
-      refreshSplit(Number(totalInput.value));
-    } }, '⚖️ Dividir igual'),
-    el('button', { type:'button', class:'btn sm ghost', onclick: (e) => {
-      split = 'custom';
-      e.target.classList.remove('ghost'); e.target.classList.add('success');
-      const other = e.target.previousElementSibling;
-      other.classList.remove('success'); other.classList.add('ghost');
-      refreshSplit(Number(totalInput.value));
-    } }, '✍️ Personalizado')
-  );
-
-  const typeSel = el('select', { name:'type', required:true });
-  UTIL_TYPES.forEach(t => typeSel.append(el('option', { value:t.v }, `${t.icon} ${t.label}`)));
 
   f.append(
     el('div', { class:'field' }, el('label', {}, 'Tipo de recibo'), typeSel),
@@ -1420,7 +1459,7 @@ async function openCreateBill() {
   );
 
   const m = modal(el('div', {}, el('h3', {}, '🧾 Nuevo recibo'), f));
-  refreshSplit(0);
+  applySplitMode();
 }
 
 // ===================== CONTRATOS =====================
