@@ -1898,20 +1898,37 @@ async function openCreateBill() {
 
   // Mapa de checks y filas. La fila muestra monto como TEXTO en equal,
   // o como INPUT en custom. Nunca tocamos otros campos del modal.
+  // ✅ Solo se auto-marcan los apartamentos OCUPADOS (los vacantes quedan
+  //    desmarcados pero seleccionables) para evitar dividir cuentas a
+  //    apartamentos sin inquilino.
   const houseRows = houses.map(h => {
+    const occupied = Array.isArray(h.tenants) && h.tenants.length > 0;
     const cb = el('input', { type:'checkbox', value:h.id });
-    cb.checked = true;
+    cb.checked = occupied;
     const amtView = el('div', { style:{ width:'140px', textAlign:'right', fontWeight:'700' } }, '—');
     const amtInput = el('input', { type:'number', step:'0.01', placeholder:'0', style:{ width:'140px' } });
     const slot = el('div', { style:{ width:'140px', display:'flex', justifyContent:'flex-end' } }, amtView);
 
+    const tenantNames = occupied
+      ? h.tenants.map(t => t.name).filter(Boolean).join(', ')
+      : null;
+    const statusBadge = occupied
+      ? el('span', { class:'badge', style:{ background:'#16a34a', color:'#fff', marginLeft:'6px' } }, '✓ Ocupado')
+      : el('span', { class:'badge', style:{ background:'#94a3b8', color:'#fff', marginLeft:'6px' } }, 'Vacante');
+
     const row = el('label', {
       style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 10px',
-              background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)',
-              cursor:'pointer' }
+              background: occupied ? 'var(--bg)' : 'rgba(148,163,184,0.08)',
+              borderRadius:'8px',
+              border:'1px solid ' + (occupied ? 'var(--border)' : 'rgba(148,163,184,0.3)'),
+              cursor:'pointer',
+              opacity: occupied ? '1' : '0.85' }
     },
       cb,
-      el('div', { style:{ flex:1 } }, el('b', {}, h.name), el('div', { class:'meta' }, h.address || '')),
+      el('div', { style:{ flex:1 } },
+        el('div', {}, el('b', {}, h.name), statusBadge),
+        el('div', { class:'meta' }, tenantNames || (h.address || 'Sin inquilino'))
+      ),
       slot
     );
     return { house: h, cb, amtView, amtInput, slot, row };

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { requireAuth, requireRole, audit } = require('../middleware');
+const rt = require('../services/realtime');
 
 // Helpers
 function round2(n) { return Math.round(Number(n) * 100) / 100; }
@@ -121,6 +122,26 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
     }
 
     audit(req, 'create_utility_bill', 'utility_bills', bill.rows[0].id);
+
+    // 🔔 Notificar a los inquilinos de cada apartamento afectado
+    const billLabel = `${type} — ${period_month}/${period_year}`;
+    for (const s of computed) {
+      const tenants = await query(
+        `SELECT id, full_name FROM users
+          WHERE house_id = $1 AND role = 'tenant' AND is_active = TRUE AND approved IS NOT FALSE`,
+        [s.house_id]
+      );
+      for (const t of tenants.rows) {
+        rt.notify(t.id, {
+          type: 'system',
+          title: `🧾 Nuevo recibo: ${billLabel}`,
+          body: `Te toca pagar ${s.amount}`,
+          link: '/#bills'
+        });
+      }
+      rt.publishToHouse(s.house_id, { type: 'bill_created', bill_id: bill.rows[0].id });
+    }
+
     res.status(201).json({ bill: bill.rows[0], shares: computed });
   } catch (e) { next(e); }
 });
@@ -161,6 +182,18 @@ router.patch('/shares/:id/pay', requireAuth, async (req, res, next) => {
       [req.params.id, receipt_url || null, reference || null, notes || null]
     );
     audit(req, 'pay_utility_share', 'utility_bill_shares', r.rows[0].id);
+
+    // 🔔 Notificar al dueño que se pagó una parte
+    if (sh.owner_id && sh.owner_id !== req.user.id) {
+      rt.notify(sh.owner_id, {
+        type: 'system',
+        title: `✅ Comprobante de servicio recibido`,
+        body: `${req.user.full_name || 'Un inquilino'} marcó como pagado un recibo`,
+        link: '/#bills'
+      });
+    }
+    rt.publishToHouse(sh.house_id, { type: 'bill_paid', share_id: r.rows[0].id });
+
     res.json({ share: r.rows[0] });
   } catch (e) { next(e); }
 });
