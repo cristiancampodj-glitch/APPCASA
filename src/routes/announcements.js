@@ -1,8 +1,40 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { requireAuth } = require('../middleware');
+const rt = require('../services/realtime');
 
-// GET /api/announcements
+// Helper: notifica un anuncio en tiempo real a quienes corresponda
+async function pushAnnouncement(announcement, opts = {}) {
+  const { houseId, targetUserId, authorId, title, body } = opts;
+  try {
+    let userIds = [];
+    if (targetUserId) {
+      userIds = [targetUserId];
+    } else if (houseId) {
+      // Todos los inquilinos activos de esa casa (excepto el autor)
+      const r = await query(
+        `SELECT id FROM users
+          WHERE house_id = $1 AND role = 'tenant'
+            AND is_active = TRUE AND COALESCE(approved, TRUE) = TRUE`,
+        [houseId]
+      );
+      userIds = r.rows.map(x => x.id).filter(id => id !== authorId);
+    }
+    for (const uid of userIds) {
+      rt.notify(uid, {
+        type: 'announcement',
+        title: `📢 ${title}`,
+        body: (body || '').slice(0, 140),
+        link: '/#announcements'
+      });
+    }
+    if (houseId) rt.publishToHouse(houseId, { type: 'announcement_created', announcement });
+  } catch (e) {
+    console.error('[announcements] pushAnnouncement error:', e.message);
+  }
+}
+
+
 // - Inquilino: avisos de su casa, donde target sea NULL o sea él
 // - Dueño: todos los avisos de las casas que posee
 router.get('/', requireAuth, async (req, res, next) => {
@@ -58,6 +90,7 @@ router.post('/', requireAuth, async (req, res, next) => {
          VALUES ($1,$2,$3,$4,$5) RETURNING *`,
         [req.user.house_id, req.user.id, title, body, !!pinned]
       );
+      pushAnnouncement(r.rows[0], { houseId: req.user.house_id, authorId: req.user.id, title, body });
       return res.status(201).json({ announcement: r.rows[0], count: 1 });
     }
 
@@ -76,6 +109,7 @@ router.post('/', requireAuth, async (req, res, next) => {
           [h.id, req.user.id, title, body, !!pinned]
         );
         inserted.push(r.rows[0]);
+        pushAnnouncement(r.rows[0], { houseId: h.id, authorId: req.user.id, title, body });
       }
       return res.status(201).json({ announcement: inserted[0], count: inserted.length });
     }
@@ -95,6 +129,7 @@ router.post('/', requireAuth, async (req, res, next) => {
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
         [u.rows[0].house_id, req.user.id, title, body, !!pinned, target_user_id]
       );
+      pushAnnouncement(r.rows[0], { targetUserId: target_user_id, authorId: req.user.id, title, body });
       return res.status(201).json({ announcement: r.rows[0], count: 1 });
     }
 
@@ -108,6 +143,7 @@ router.post('/', requireAuth, async (req, res, next) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [targetHouse, req.user.id, title, body, !!pinned]
     );
+    pushAnnouncement(r.rows[0], { houseId: targetHouse, authorId: req.user.id, title, body });
     res.status(201).json({ announcement: r.rows[0], count: 1 });
   } catch (e) { next(e); }
 });
