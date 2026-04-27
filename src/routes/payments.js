@@ -7,18 +7,28 @@ const pdf = require('../services/pdf');
 // GET /api/payments
 router.get('/', requireAuth, async (req, res, next) => {
   try {
-    const { status, year, month } = req.query;
-    const where = ['p.house_id = $1'];
-    const params = [req.user.house_id];
-    if (req.user.role === 'tenant') { params.push(req.user.id); where.push(`p.tenant_id = $${params.length}`); }
-    if (status) { params.push(status); where.push(`p.status = $${params.length}`); }
-    if (year)   { params.push(year);   where.push(`p.period_year = $${params.length}`); }
-    if (month)  { params.push(month);  where.push(`p.period_month = $${params.length}`); }
+    const { status, year, month, house_id } = req.query;
+    const where = [];
+    const params = [];
+    if (req.user.role === 'tenant') {
+      params.push(req.user.house_id); where.push(`p.house_id = $${params.length}`);
+      params.push(req.user.id);        where.push(`p.tenant_id = $${params.length}`);
+    } else if (req.user.role === 'owner') {
+      // Dueño: ve pagos de TODAS sus casas (owner_id) o de su casa principal si owner_id es null
+      params.push(req.user.id);
+      params.push(req.user.house_id);
+      where.push(`(EXISTS (SELECT 1 FROM houses h WHERE h.id = p.house_id AND h.owner_id = $${params.length - 1}) OR p.house_id = $${params.length})`);
+    }
+    if (house_id) { params.push(house_id); where.push(`p.house_id = $${params.length}`); }
+    if (status)   { params.push(status);   where.push(`p.status = $${params.length}`); }
+    if (year)     { params.push(year);     where.push(`p.period_year = $${params.length}`); }
+    if (month)    { params.push(month);    where.push(`p.period_month = $${params.length}`); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const r = await query(
       `SELECT p.*, u.full_name AS tenant_name
        FROM payments p
        JOIN users u ON u.id = p.tenant_id
-       WHERE ${where.join(' AND ')}
+       ${whereSql}
        ORDER BY p.period_year DESC, p.period_month DESC`,
       params
     );
@@ -32,7 +42,21 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
     const { tenant_id, period_month, period_year, amount, due_date, notes, currency } = req.body;
     let { contract_id } = req.body;
     const cur = (currency || '').toUpperCase() || null; // null deja al trigger heredar de la casa
-    const house_id = req.user.house_id;
+
+    // Resolver house_id desde el inquilino (no desde req.user.house_id, que es la casa "principal" del dueño)
+    const t = await query('SELECT id, house_id FROM users WHERE id = $1 AND role = $2', [tenant_id, 'tenant']);
+    if (!t.rows[0] || !t.rows[0].house_id) {
+      return res.status(400).json({ error: 'Inquilino inválido o sin casa asignada' });
+    }
+    const house_id = t.rows[0].house_id;
+
+    // Validar que el dueño tenga acceso a esa casa (owner_id) o sea admin
+    if (req.user.role !== 'admin') {
+      const h = await query('SELECT owner_id FROM houses WHERE id = $1', [house_id]);
+      if (!h.rows[0] || (h.rows[0].owner_id && h.rows[0].owner_id !== req.user.id)) {
+        return res.status(403).json({ error: 'No tienes permiso sobre esta casa' });
+      }
+    }
 
     // Validar contract_id si vino, o resolver/crear el contrato a partir de house+tenant
     if (contract_id) {
