@@ -4,13 +4,35 @@ const { requireAuth, audit } = require('../middleware');
 
 router.get('/', requireAuth, async (req, res, next) => {
   try {
+    // Filtro por rol:
+    //  - admin: ve todos los daños
+    //  - owner: ve los daños de TODAS las casas que administra (houses.owner_id = user.id)
+    //           + los de su propia house_id (compatibilidad).
+    //  - tenant: solo los de su house_id.
+    let where, params;
+    if (req.user.role === 'admin') {
+      where = 'TRUE';
+      params = [];
+    } else if (req.user.role === 'owner') {
+      where = '(h.owner_id = $1 OR d.house_id = $2)';
+      params = [req.user.id, req.user.house_id];
+    } else {
+      where = 'd.house_id = $1';
+      params = [req.user.house_id];
+    }
     const r = await query(
-      `SELECT d.*, u.full_name AS reporter_name,
+      `SELECT d.*,
+              u.full_name AS reporter_name,
+              h.name      AS house_name,
+              h.unit_label AS house_unit,
               (SELECT json_agg(p.*) FROM damage_photos p WHERE p.damage_id = d.id) AS photos
-       FROM damages d
-       JOIN users u ON u.id = d.reported_by
-       WHERE d.house_id = $1
-       ORDER BY d.created_at DESC`, [req.user.house_id]);
+         FROM damages d
+         JOIN users  u ON u.id = d.reported_by
+         JOIN houses h ON h.id = d.house_id
+        WHERE ${where}
+        ORDER BY d.created_at DESC`,
+      params
+    );
     res.json({ damages: r.rows });
   } catch (e) { next(e); }
 });
@@ -35,6 +57,20 @@ router.post('/', requireAuth, async (req, res, next) => {
 router.patch('/:id', requireAuth, async (req, res, next) => {
   try {
     const { status, final_cost } = req.body;
+    // Verificar permiso: el usuario debe ser admin, dueño de la casa del daño,
+    // o el inquilino que lo reportó (para cancelar).
+    const owner = await query(
+      `SELECT d.id, d.reported_by, d.house_id, h.owner_id
+         FROM damages d JOIN houses h ON h.id = d.house_id
+        WHERE d.id = $1`, [req.params.id]);
+    const row = owner.rows[0];
+    if (!row) return res.status(404).json({ error: 'Daño no encontrado' });
+    const isAdmin   = req.user.role === 'admin';
+    const isOwner   = row.owner_id === req.user.id;
+    const isReporter= row.reported_by === req.user.id;
+    if (!isAdmin && !isOwner && !isReporter) {
+      return res.status(403).json({ error: 'No tienes permiso para modificar este daño' });
+    }
     const r = await query(
       `UPDATE damages SET
          status = COALESCE($2, status),
@@ -44,6 +80,7 @@ router.patch('/:id', requireAuth, async (req, res, next) => {
        WHERE id = $1 RETURNING *`,
       [req.params.id, status, final_cost, req.user.id]
     );
+    audit(req, 'update_damage', 'damages', req.params.id, { status });
     res.json({ damage: r.rows[0] });
   } catch (e) { next(e); }
 });

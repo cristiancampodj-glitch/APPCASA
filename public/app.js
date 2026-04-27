@@ -1311,6 +1311,7 @@ async function viewAllPayments(c) {
 }
 
 async function viewAllDamages(c) {
+  const isOwner = ['owner','admin'].includes(state.user.role);
   c.append(el('div', { class:'topbar' },
     el('h1', {}, '🛠️ Daños'),
     el('button', { class:'btn', onclick: openReportDamage }, '+ Reportar daño')
@@ -1320,15 +1321,51 @@ async function viewAllDamages(c) {
   try {
     const { damages } = await API.get('/api/damages');
     if (!damages || !damages.length) return sec.append(emptyState('✅', 'Sin daños reportados'));
-    const list = el('div', { class:'list' });
-    damages.forEach(d => list.append(el('div', { class:'list-item' },
-      el('div', {},
-        el('div', { class:'name' }, '🛠️ ' + d.title),
-        el('div', { class:'meta' }, `${d.location || '—'} · ${fmtDate(d.created_at)}`)
-      ),
-      el('span', { class:'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status)
-    )));
-    sec.append(list);
+
+    // Pendientes primero
+    const pendings = damages.filter(d => d.status !== 'resolved');
+    const done     = damages.filter(d => d.status === 'resolved');
+
+    const renderList = (arr, title) => {
+      if (!arr.length) return;
+      sec.append(el('h3', { style:{ marginTop:'16px' } }, title));
+      const list = el('div', { class:'list' });
+      arr.forEach(d => {
+        const houseLabel = d.house_unit
+          ? `${d.house_unit} · ${d.house_name || ''}`
+          : (d.house_name || '');
+        const item = el('div', { class:'list-item' },
+          el('div', { style:{ flex:1 } },
+            el('div', { class:'name' },
+              (d.priority === 'urgent' ? '🚨 ' : d.priority === 'high' ? '🔴 ' : '🛠️ ') + d.title),
+            el('div', { class:'meta' },
+              `🏠 ${houseLabel} · 📍 ${d.location || '—'}`),
+            el('div', { class:'meta' },
+              `${fmtDate(d.created_at)} · 👤 ${d.reporter_name || ''}`),
+            d.description && el('div', { style:{ marginTop:'6px', fontSize:'14px' } }, d.description),
+            d.photo_url && el('img', { src: d.photo_url,
+              style:{ marginTop:'8px', maxWidth:'220px', borderRadius:'10px' } })
+          ),
+          el('div', { class:'list-actions' },
+            el('span', { class:'badge ' + (d.status === 'resolved' ? 'paid' : 'pending') }, d.status),
+            isOwner && d.status !== 'resolved' && el('button', { class:'btn sm success',
+              onclick: async () => {
+                if (!confirm('¿Marcar este daño como resuelto?')) return;
+                try {
+                  await API.patch('/api/damages/' + d.id, { status:'resolved' });
+                  toast('Daño resuelto ✅', 'success'); render();
+                } catch (err) { toast(err.message, 'error'); }
+              }
+            }, '✅ Resolver')
+          )
+        );
+        list.append(item);
+      });
+      sec.append(list);
+    };
+
+    renderList(pendings, `⏳ Pendientes (${pendings.length})`);
+    renderList(done,     `✅ Resueltos (${done.length})`);
   } catch (e) { sec.append(emptyState('⚠️', e.message)); }
 }
 
