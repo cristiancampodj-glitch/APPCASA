@@ -48,6 +48,8 @@ app.use('/api/dashboard',     require('./src/routes/dashboard'));
 app.use('/api/ai',            require('./src/routes/ai'));
 app.use('/api/admin',         require('./src/routes/admin'));
 app.use('/api/currencies',    require('./src/routes/currencies'));
+app.use('/api/contracts',     require('./src/routes/contracts'));
+app.use('/api/utility-bills', require('./src/routes/utilityBills'));
 
 // --- Webhooks (sin auth, validados con firma) ---
 app.use('/webhooks', require('./src/routes/webhooks'));

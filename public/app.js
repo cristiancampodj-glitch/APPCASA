@@ -172,6 +172,8 @@ function renderApp() {
     el('nav', { class:'nav' },
       navBtn('home',     '🏠', state.user.role === 'tenant' ? 'Mi Apartamento' : 'Mis Propiedades'),
       navBtn('payments', '💰', 'Pagos'),
+      navBtn('bills',    '🧾', 'Recibos'),
+      navBtn('contracts','📄', 'Contratos'),
       navBtn('damages',  '🛠️', 'Daños'),
       navBtn('messages', '💬', 'Avisos'),
       navBtn('settings', '⚙️', 'Ajustes')
@@ -197,9 +199,11 @@ function renderApp() {
   const bottom = el('nav', { class:'bottom-nav' },
     bottomBtn('home', '🏠', 'Inicio'),
     bottomBtn('payments', '💰', 'Pagos'),
+    bottomBtn('bills', '🧾', 'Recibos'),
+    bottomBtn('contracts', '📄', 'Contrato'),
     bottomBtn('damages', '🛠️', 'Daños'),
     bottomBtn('messages', '💬', 'Avisos'),
-    bottomBtn('settings', '⚙️', 'Ajustes')
+    bottomBtn('settings', '⚙️', 'Más')
   );
 
   // FAB IA
@@ -227,11 +231,13 @@ function logout() { API.setToken(null); state.user = null; render(); }
 function renderView(c) {
   if (state.currentHouseId) return viewHouseDetail(c);
   switch (state.view) {
-    case 'home':     return state.user.role === 'tenant' ? viewTenantHome(c) : viewProperties(c);
-    case 'payments': return viewAllPayments(c);
-    case 'damages':  return viewAllDamages(c);
-    case 'messages': return viewAnnouncements(c);
-    case 'settings': return viewSettings(c);
+    case 'home':      return state.user.role === 'tenant' ? viewTenantHome(c) : viewProperties(c);
+    case 'payments':  return viewAllPayments(c);
+    case 'bills':     return viewBills(c);
+    case 'contracts': return viewContracts(c);
+    case 'damages':   return viewAllDamages(c);
+    case 'messages':  return viewAnnouncements(c);
+    case 'settings':  return viewSettings(c);
     default: return viewProperties(c);
   }
 }
@@ -425,6 +431,15 @@ async function viewHouseDetail(c) {
   );
   c.append(sec3);
   loadDamages(sec3, h);
+
+  // 📄 Contrato
+  const sec4 = el('div', { class:'detail-section' },
+    el('h3', {}, '📄 Contrato',
+      el('button', { class:'btn sm', style:{ marginLeft:'auto' },
+        onclick: () => openContractEditor(h) }, '✏️ Editar / Firmar'))
+  );
+  c.append(sec4);
+  loadHouseContract(sec4, h);
 }
 
 function kpi(label, value, type='') {
@@ -1198,6 +1213,446 @@ function openAI() {
       );
       return f;
     })()
+  ));
+}
+
+// ===================== RECIBOS COMPARTIDOS (UTILITY BILLS) =====================
+const UTIL_TYPES = [
+  { v:'water',       icon:'💧', label:'Agua' },
+  { v:'electricity', icon:'💡', label:'Luz' },
+  { v:'gas',         icon:'🔥', label:'Gas' },
+  { v:'internet',    icon:'🌐', label:'Internet' },
+  { v:'tv',          icon:'📺', label:'TV' },
+  { v:'admin',       icon:'🏢', label:'Administración' },
+  { v:'other',       icon:'🧾', label:'Otro' }
+];
+const utilMeta = (v) => UTIL_TYPES.find(t => t.v === v) || { icon:'🧾', label: v };
+
+async function viewBills(c) {
+  const isOwner = state.user.role !== 'tenant';
+  c.append(el('div', { class:'topbar' },
+    el('h1', {}, '🧾 Recibos'),
+    el('div', { class:'topbar-actions' },
+      isOwner && el('button', { class:'btn sm', onclick: openCreateBill }, '+ Nuevo recibo'),
+      el('button', { class:'icon-btn', onclick:()=> setTheme(state.theme==='dark'?'light':'dark') },
+        state.theme==='dark'?'☀️':'🌙')
+    )
+  ));
+
+  const wrap = el('div', { class:'detail-section' });
+  c.append(wrap);
+  wrap.append(el('div', { class:'spinner' }));
+
+  try {
+    const { bills } = await API.get('/api/utility-bills');
+    wrap.innerHTML = '';
+    if (!bills.length) { wrap.append(emptyState('🧾', 'Aún no hay recibos cargados')); return; }
+
+    bills.forEach(b => {
+      const meta = utilMeta(b.type);
+      const card = el('div', { class:'list-item', style:{ flexDirection:'column', alignItems:'stretch', gap:'10px' } });
+      card.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'10px' } },
+        el('div', { style:{ fontSize:'28px' } }, meta.icon),
+        el('div', { style:{ flex:1 } },
+          el('div', { class:'name' }, `${meta.label} — ${b.period_month}/${b.period_year}`),
+          el('div', { class:'meta' },
+            (isOwner ? `Total: ${fmtMoney(b.total_amount)} · ` : '') +
+            (b.due_date ? `Vence ${fmtDate(b.due_date)}` : 'Sin fecha'))
+        ),
+        b.bill_url && el('a', { class:'btn sm ghost', href: b.bill_url, target:'_blank' }, '📎 Ver recibo'),
+        isOwner && el('button', { class:'btn sm ghost', onclick: async ()=>{
+          if (!confirm('¿Eliminar este recibo?')) return;
+          try { await API.del(`/api/utility-bills/${b.id}`); toast('Eliminado','success'); render(); }
+          catch(e){ toast(e.message,'error'); }
+        }}, '🗑️')
+      ));
+
+      const sharesBox = el('div', { style:{ display:'grid', gap:'6px' } });
+      (b.shares || []).filter(s => s).forEach(s => {
+        sharesBox.append(el('div', {
+          style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                  padding:'8px 10px', background:'var(--bg)', borderRadius:'8px',
+                  border:'1px solid var(--border)' }
+        },
+          el('div', {},
+            el('b', {}, '🏠 ' + (s.house_name || '—')),
+            el('div', { class:'meta' }, fmtMoney(s.amount))
+          ),
+          el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' } },
+            el('span', { class:'badge ' + (s.paid ? 'paid' : 'pending') }, s.paid ? 'Pagado' : 'Pendiente'),
+            !s.paid && el('button', { class:'btn sm success', onclick: async ()=>{
+              try { await API.patch(`/api/utility-bills/shares/${s.id}/pay`); toast('Marcado pagado','success'); render(); }
+              catch(e){ toast(e.message,'error'); }
+            }}, '✓ Pagado')
+          )
+        ));
+      });
+      card.append(sharesBox);
+      if (b.notes) card.append(el('div', { class:'meta' }, '📝 ' + b.notes));
+      wrap.append(card);
+    });
+  } catch (e) {
+    wrap.innerHTML = '';
+    wrap.append(emptyState('⚠️', e.message));
+  }
+}
+
+async function openCreateBill() {
+  let houses = state.houses;
+  if (!houses || !houses.length) {
+    try { const r = await API.get('/api/houses'); houses = r.houses; state.houses = houses; }
+    catch (e) { return toast(e.message, 'error'); }
+  }
+  if (!houses.length) return toast('Primero crea propiedades', 'error');
+
+  const now = new Date();
+  let split = 'equal';
+
+  // Mapa de checks y inputs por casa
+  const houseRows = houses.map(h => {
+    const cb = el('input', { type:'checkbox', name:'house_'+h.id, checked:true, value:h.id });
+    const amt = el('input', { type:'number', step:'0.01', name:'amount_'+h.id, placeholder:'0', style:{ width:'140px' } });
+    const row = el('div', {
+      style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 10px',
+              background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }
+    },
+      cb,
+      el('div', { style:{ flex:1 } }, el('b', {}, h.name), el('div', { class:'meta' }, h.address || '')),
+      amt
+    );
+    return { house: h, cb, amt, row };
+  });
+
+  const splitInfo = el('div', { class:'meta', style:{ marginTop:'4px' } });
+
+  function refreshSplit(total) {
+    const checked = houseRows.filter(r => r.cb.checked);
+    if (split === 'equal') {
+      houseRows.forEach(r => r.amt.disabled = true);
+      if (!checked.length || !total) {
+        splitInfo.textContent = '';
+        return;
+      }
+      const per = Math.round((total / checked.length) * 100) / 100;
+      checked.forEach((r, i) => {
+        r.amt.value = (i === checked.length - 1)
+          ? (Math.round((total - per * (checked.length - 1)) * 100) / 100).toFixed(2)
+          : per.toFixed(2);
+      });
+      houseRows.filter(r => !r.cb.checked).forEach(r => r.amt.value = '');
+      splitInfo.textContent = `División equitativa entre ${checked.length} propiedad${checked.length>1?'es':''}.`;
+    } else {
+      houseRows.forEach(r => r.amt.disabled = !r.cb.checked);
+      const sum = checked.reduce((a, r) => a + (Number(r.amt.value) || 0), 0);
+      splitInfo.textContent = `Suma actual: ${fmtMoney(sum)} / Total: ${fmtMoney(total||0)}`;
+    }
+  }
+
+  const f = el('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(f));
+    const total = Number(data.total_amount);
+    const shares = houseRows.filter(r => r.cb.checked).map(r => ({
+      house_id: r.house.id,
+      amount: Number(r.amt.value) || 0
+    }));
+    if (!shares.length) return toast('Selecciona al menos una propiedad', 'error');
+    try {
+      await API.post('/api/utility-bills', {
+        type: data.type,
+        period_month: Number(data.period_month),
+        period_year: Number(data.period_year),
+        total_amount: total,
+        due_date: data.due_date || null,
+        bill_url: data.bill_url || null,
+        notes: data.notes || null,
+        split,
+        shares
+      });
+      m.close(); toast('Recibo creado ✅', 'success'); render();
+    } catch (err) { toast(err.message, 'error'); }
+  }});
+
+  const totalInput = el('input', { name:'total_amount', type:'number', step:'0.01', required:true, placeholder:'0' });
+  totalInput.addEventListener('input', () => refreshSplit(Number(totalInput.value)));
+  houseRows.forEach(r => {
+    r.cb.addEventListener('change', () => refreshSplit(Number(totalInput.value)));
+    r.amt.addEventListener('input', () => { if (split === 'custom') refreshSplit(Number(totalInput.value)); });
+  });
+
+  const splitSel = el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' } },
+    el('button', { type:'button', class:'btn sm success', onclick: (e) => {
+      split = 'equal';
+      e.target.classList.remove('ghost'); e.target.classList.add('success');
+      const other = e.target.nextElementSibling;
+      other.classList.remove('success'); other.classList.add('ghost');
+      refreshSplit(Number(totalInput.value));
+    } }, '⚖️ Dividir igual'),
+    el('button', { type:'button', class:'btn sm ghost', onclick: (e) => {
+      split = 'custom';
+      e.target.classList.remove('ghost'); e.target.classList.add('success');
+      const other = e.target.previousElementSibling;
+      other.classList.remove('success'); other.classList.add('ghost');
+      refreshSplit(Number(totalInput.value));
+    } }, '✍️ Personalizado')
+  );
+
+  const typeSel = el('select', { name:'type', required:true });
+  UTIL_TYPES.forEach(t => typeSel.append(el('option', { value:t.v }, `${t.icon} ${t.label}`)));
+
+  f.append(
+    el('div', { class:'field' }, el('label', {}, 'Tipo de recibo'), typeSel),
+    el('div', { class:'field' }, el('label', {}, 'Total del recibo'), totalInput),
+    el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px' } },
+      field('period_month', 'Mes',  'number', true, now.getMonth() + 1),
+      field('period_year',  'Año',  'number', true, now.getFullYear())
+    ),
+    field('due_date', 'Fecha de vencimiento', 'date'),
+    field('bill_url', 'Enlace al recibo (PDF/imagen) — opcional', 'url'),
+    el('div', { class:'field' }, el('label', {}, 'Notas (opcional)'),
+      el('textarea', { name:'notes', rows:2 })),
+
+    el('h4', { style:{ marginTop:'14px', marginBottom:'4px' } }, 'Dividir entre propiedades'),
+    splitSel,
+    el('div', { style:{ display:'grid', gap:'6px', marginBottom:'6px' } }, ...houseRows.map(r => r.row)),
+    splitInfo,
+    el('button', { class:'btn lg block', type:'submit', style:{ marginTop:'14px' } }, '💾 Crear recibo')
+  );
+
+  const m = modal(el('div', {}, el('h3', {}, '🧾 Nuevo recibo'), f));
+  refreshSplit(0);
+}
+
+// ===================== CONTRATOS =====================
+async function viewContracts(c) {
+  const isOwner = state.user.role !== 'tenant';
+  c.append(el('div', { class:'topbar' },
+    el('h1', {}, '📄 Contratos'),
+    el('button', { class:'icon-btn', onclick:()=> setTheme(state.theme==='dark'?'light':'dark') },
+      state.theme==='dark'?'☀️':'🌙')
+  ));
+
+  const wrap = el('div', { class:'detail-section' });
+  c.append(wrap);
+  wrap.append(el('div', { class:'spinner' }));
+
+  try {
+    const { contracts } = await API.get('/api/contracts');
+    wrap.innerHTML = '';
+    if (!contracts.length) {
+      wrap.append(emptyState('📄', isOwner ? 'Crea un contrato desde la propiedad' : 'Aún no tienes contrato'));
+      return;
+    }
+    contracts.forEach(ct => wrap.append(renderContractCard(ct)));
+  } catch (e) {
+    wrap.innerHTML = '';
+    wrap.append(emptyState('⚠️', e.message));
+  }
+}
+
+function renderContractCard(ct) {
+  const ownerSigned = !!ct.signature_owner;
+  const tenantSigned = !!ct.signature_tenant;
+  return el('div', { class:'list-item', style:{ flexDirection:'column', alignItems:'stretch', gap:'8px' } },
+    el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' } },
+      el('div', { style:{ fontSize:'28px' } }, '📄'),
+      el('div', { style:{ flex:1 } },
+        el('div', { class:'name' }, `${ct.house_name} — ${ct.tenant_name}`),
+        el('div', { class:'meta' },
+          `Inicio ${fmtDate(ct.start_date)}${ct.end_date ? ' → ' + fmtDate(ct.end_date) : ''} · ${fmtMoney(ct.monthly_rent)}/mes`)
+      ),
+      el('span', { class:'badge ' + (ownerSigned && tenantSigned ? 'paid' : 'pending') },
+        ownerSigned && tenantSigned ? 'Firmado' : 'Pendiente firma')
+    ),
+    el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' } },
+      el('span', { class:'badge ' + (ownerSigned ? 'paid' : 'pending') },
+        (ownerSigned ? '✅' : '⏳') + ' Dueño'),
+      el('span', { class:'badge ' + (tenantSigned ? 'paid' : 'pending') },
+        (tenantSigned ? '✅' : '⏳') + ' Inquilino'),
+      el('button', { class:'btn sm', onclick: () => openContractView(ct) }, '👁️ Ver / Firmar')
+    )
+  );
+}
+
+async function loadHouseContract(container, house) {
+  try {
+    const { contracts } = await API.get('/api/contracts');
+    const list = contracts.filter(ct => ct.house_id === house.id);
+    if (!list.length) { container.append(emptyState('📄', 'Sin contrato. Toca «Editar / Firmar» para crearlo.')); return; }
+    list.forEach(ct => container.append(renderContractCard(ct)));
+  } catch (e) { container.append(emptyState('⚠️', e.message)); }
+}
+
+async function openContractEditor(house) {
+  const tenant = (house.tenants || [])[0];
+  if (!tenant) return toast('Primero añade un inquilino', 'error');
+
+  // Buscar contrato existente para esa casa
+  let existing = null;
+  try {
+    const { contracts } = await API.get('/api/contracts');
+    existing = contracts.find(ct => ct.house_id === house.id) || null;
+  } catch {}
+
+  const placeholder = `CONTRATO DE ARRENDAMIENTO
+
+Entre el ARRENDADOR y el ARRENDATARIO ${tenant.name},
+identificado con ${tenant.email}, se celebra el siguiente contrato sobre el inmueble
+ubicado en ${house.address || '_____'}.
+
+CLÁUSULAS:
+1. CANON: El arrendatario pagará la suma de ${fmtMoney(house.monthly_rent || 0, house.currency)} mensuales.
+2. DURACIÓN: ____ meses, contados a partir del ___ de _____ de 20__.
+3. DEPÓSITO: ____.
+4. SERVICIOS: A cargo del arrendatario (agua, luz, gas, internet salvo pacto en contrario).
+5. ...
+`;
+
+  const ta = el('textarea', { rows: 14, name:'body_text', style:{ fontFamily:'monospace' } },
+    existing?.body_text || placeholder);
+
+  const f = el('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(f));
+    try {
+      let contract;
+      if (existing) {
+        const r = await API.patch(`/api/contracts/${existing.id}`, {
+          body_text: data.body_text,
+          monthly_rent: data.monthly_rent ? Number(data.monthly_rent) : undefined,
+          end_date: data.end_date || null
+        });
+        contract = r.contract;
+      } else {
+        const r = await API.post('/api/contracts', {
+          house_id: house.id,
+          tenant_id: tenant.id,
+          start_date: data.start_date || new Date().toISOString().slice(0,10),
+          end_date: data.end_date || null,
+          monthly_rent: Number(data.monthly_rent) || Number(house.monthly_rent) || 0,
+          deposit: Number(data.deposit) || 0,
+          payment_day: Number(data.payment_day) || house.rent_due_day || 5,
+          body_text: data.body_text
+        });
+        contract = r.contract;
+      }
+      m.close(); toast('Contrato guardado ✅', 'success');
+      openContractView({ ...contract, house_name: house.name, tenant_name: tenant.name });
+    } catch (err) { toast(err.message, 'error'); }
+  }});
+
+  f.append(
+    el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:'10px' } },
+      field('start_date', 'Inicio', 'date', !existing, existing?.start_date?.slice(0,10) || ''),
+      field('end_date',   'Fin (opcional)', 'date', false, existing?.end_date?.slice(0,10) || ''),
+      field('monthly_rent', 'Canon mensual', 'number', false, existing?.monthly_rent || house.monthly_rent || ''),
+      field('deposit', 'Depósito', 'number', false, existing?.deposit || ''),
+      field('payment_day', 'Día de pago', 'number', false, existing?.payment_day || house.rent_due_day || 5)
+    ),
+    el('div', { class:'field' }, el('label', {}, 'Cuerpo del contrato'), ta),
+    el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar contrato')
+  );
+
+  const m = modal(el('div', {},
+    el('h3', {}, existing ? '✏️ Editar contrato' : '📄 Nuevo contrato'),
+    el('p', { class:'meta' }, `Inquilino: ${tenant.name}`),
+    f
+  ));
+}
+
+function openContractView(ct) {
+  const isOwner = state.user.role !== 'tenant';
+  const isTenant = state.user.role === 'tenant' && ct.tenant_id === state.user.id;
+
+  const body = el('pre', {
+    style:{ whiteSpace:'pre-wrap', padding:'14px', background:'var(--bg)',
+            borderRadius:'10px', maxHeight:'320px', overflow:'auto', fontFamily:'inherit',
+            border:'1px solid var(--border)' }
+  }, ct.body_text || '(sin cuerpo escrito)');
+
+  const sigBoxes = el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'12px' } });
+  function sigCell(label, dataUrl, signed_at) {
+    return el('div', { style:{ padding:'10px', background:'var(--bg)', border:'1px solid var(--border)', borderRadius:'10px', textAlign:'center' } },
+      el('div', { style:{ fontWeight:'700', marginBottom:'6px' } }, label),
+      dataUrl
+        ? el('img', { src: dataUrl, alt:'firma', style:{ maxHeight:'80px', maxWidth:'100%', background:'#fff', borderRadius:'6px' } })
+        : el('div', { class:'meta' }, 'Sin firma'),
+      signed_at && el('div', { class:'meta', style:{ marginTop:'4px' } }, fmtDate(signed_at))
+    );
+  }
+  sigBoxes.append(
+    sigCell('🖊️ Firma del dueño', ct.signature_owner, ct.signed_owner_at),
+    sigCell('🖊️ Firma del inquilino', ct.signature_tenant, ct.signed_tenant_at)
+  );
+
+  const canCurrentSign =
+    (isTenant && !ct.signature_tenant) ||
+    (isOwner  && !ct.signature_owner);
+
+  const actions = el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap', marginTop:'12px' } });
+  if (canCurrentSign) {
+    actions.append(el('button', { class:'btn success', onclick: () => openSignaturePad(ct) }, '🖊️ Firmar ahora'));
+  }
+  actions.append(el('button', { class:'btn ghost', onclick: () => window.print() }, '🖨️ Imprimir'));
+
+  modal(el('div', {},
+    el('h3', {}, `📄 ${ct.house_name || ''} — ${ct.tenant_name || ''}`),
+    el('div', { class:'meta', style:{ marginBottom:'10px' } },
+      `Inicio ${fmtDate(ct.start_date)}${ct.end_date ? ' → ' + fmtDate(ct.end_date) : ''} · ${fmtMoney(ct.monthly_rent)}/mes`),
+    body,
+    sigBoxes,
+    actions
+  ));
+}
+
+function openSignaturePad(ct) {
+  const canvas = el('canvas', {
+    width: 500, height: 180,
+    style:{ width:'100%', maxWidth:'500px', background:'#fff', borderRadius:'10px', border:'1px solid var(--border)', touchAction:'none', cursor:'crosshair' }
+  });
+  const ctx = canvas.getContext('2d');
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#000';
+
+  let drawing = false, last = null, hasInk = false;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return {
+      x: (t.clientX - r.left) * (canvas.width / r.width),
+      y: (t.clientY - r.top)  * (canvas.height / r.height)
+    };
+  }
+  function down(e){ e.preventDefault(); drawing = true; last = pos(e); }
+  function move(e){
+    if (!drawing) return;
+    e.preventDefault();
+    const p = pos(e);
+    ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    last = p; hasInk = true;
+  }
+  function up(){ drawing = false; }
+  canvas.addEventListener('mousedown', down);
+  canvas.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+  canvas.addEventListener('touchstart', down);
+  canvas.addEventListener('touchmove', move);
+  window.addEventListener('touchend', up);
+
+  const m = modal(el('div', {},
+    el('h3', {}, '🖊️ Firma digital'),
+    el('p', { class:'meta' }, 'Firma con el dedo o el ratón dentro del recuadro.'),
+    canvas,
+    el('div', { style:{ display:'flex', gap:'8px', marginTop:'10px', flexWrap:'wrap' } },
+      el('button', { class:'btn ghost', onclick: () => { ctx.clearRect(0,0,canvas.width,canvas.height); hasInk = false; } }, '🧹 Limpiar'),
+      el('button', { class:'btn success', onclick: async () => {
+        if (!hasInk) return toast('Firma vacía', 'error');
+        try {
+          const dataUrl = canvas.toDataURL('image/png');
+          await API.post(`/api/contracts/${ct.id}/sign`, { signature: dataUrl });
+          m.close(); toast('Firmado ✅', 'success'); render();
+        } catch (e) { toast(e.message, 'error'); }
+      }}, '✅ Confirmar firma')
+    )
   ));
 }
 
