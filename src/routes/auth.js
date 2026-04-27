@@ -3,43 +3,39 @@ const { query } = require('../db');
 const { hash, compare, sign } = require('../auth');
 const { requireAuth, audit } = require('../middleware');
 
-// POST /api/auth/register — solo el primer dueño se auto-registra
+// POST /api/auth/register — toda cuenta nueva queda PENDIENTE de aprobación
 router.post('/register', async (req, res, next) => {
   try {
-    const { full_name, email, password, phone, house_name, currency } = req.body;
+    const { full_name, email, password, phone, house_name, currency, requested_role } = req.body;
     if (!full_name || !email || !password) return res.status(400).json({ error: 'Datos incompletos' });
     if (password.length < 6) return res.status(400).json({ error: 'Contraseña muy corta' });
 
     const exists = await query('SELECT id FROM users WHERE email = $1', [email]);
     if (exists.rows[0]) return res.status(409).json({ error: 'Email ya registrado' });
 
-    // Crea casa si manda house_name
-    let house_id = null;
-    let house_to_set_owner = null;
-    if (house_name) {
-      const cur = ((currency || 'COP') + '').toUpperCase();
-      const h = await query(
-        `INSERT INTO houses (name, currency) VALUES ($1, $2) RETURNING id`,
-        [house_name, cur]
-      );
-      house_id = h.rows[0].id;
-      house_to_set_owner = house_id;
-    }
-
+    const role = (requested_role === 'owner' || house_name) ? 'owner' : 'tenant';
     const password_hash = await hash(password);
-    const role = house_id ? 'owner' : 'tenant';
+
+    // Cuenta inactiva y NO aprobada hasta que un admin la valide.
+    // No se crea la casa todavía: si pide ser dueño, guardamos el nombre y moneda
+    // en pending_house_name/pending_currency para crear la casa al aprobar.
     const u = await query(
-      `INSERT INTO users (house_id, full_name, email, phone, password_hash, role)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id, full_name, email, role, house_id`,
-      [house_id, full_name, email, phone || null, password_hash, role]
+      `INSERT INTO users (
+         full_name, email, phone, password_hash, role,
+         is_active, approved, requested_role,
+         pending_house_name, pending_currency
+       )
+       VALUES ($1,$2,$3,$4,$5, FALSE, FALSE, $5, $6, $7)
+       RETURNING id, full_name, email, role`,
+      [full_name, email, phone || null, password_hash, role,
+       house_name || null, ((currency || 'COP') + '').toUpperCase()]
     );
-    const user = u.rows[0];
-    if (house_to_set_owner) {
-      await query(`UPDATE houses SET owner_id=$1 WHERE id=$2`, [user.id, house_to_set_owner]);
-    }
-    const token = sign({ id: user.id, role: user.role, house_id: user.house_id, email: user.email });
-    res.json({ user, token });
+    audit(req, 'register_request', 'users', u.rows[0].id, { role });
+    res.status(202).json({
+      pending: true,
+      message: 'Tu solicitud fue recibida. Un administrador la revisará y te avisaremos cuando esté aprobada.',
+      user: u.rows[0]
+    });
   } catch (e) { next(e); }
 });
 
@@ -47,11 +43,18 @@ router.post('/register', async (req, res, next) => {
 router.post('/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const r = await query('SELECT * FROM users WHERE email = $1 AND is_active = TRUE', [email]);
+    const r = await query('SELECT * FROM users WHERE email = $1', [email]);
     const u = r.rows[0];
     if (!u) return res.status(401).json({ error: 'Credenciales inválidas' });
     const ok = await compare(password, u.password_hash);
     if (!ok) return res.status(401).json({ error: 'Credenciales inválidas' });
+
+    if (u.approved !== true) {
+      return res.status(403).json({ error: 'Tu cuenta aún no ha sido aprobada por un administrador.' });
+    }
+    if (u.is_active === false) {
+      return res.status(403).json({ error: 'Tu cuenta está desactivada. Contacta al administrador.' });
+    }
 
     await query('UPDATE users SET last_login = NOW() WHERE id = $1', [u.id]);
     const token = sign({ id: u.id, role: u.role, house_id: u.house_id, email: u.email });
