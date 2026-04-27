@@ -184,6 +184,8 @@ async function boot() {
     setInterval(() => API.refresh(), 6 * 60 * 60 * 1000);
     // 🔔 Conectar canal en tiempo real (SSE)
     connectRealtime();
+    // 🔔 Pedir permiso de notificaciones (una sola vez por dispositivo)
+    askNotificationPermission();
     // 🔄 Refrescar al volver de segundo plano (móvil/PWA)
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden && state.user) softRefresh();
@@ -227,13 +229,22 @@ function handleRealtime(ev) {
       break;
     case 'notification': {
       const n = ev.notification || {};
+      const cat = NotifyFX.categoryOf(n.type);
       toast(n.title + (n.body ? ' — ' + n.body : ''), 'info');
-      // 🔉 sonidito + vibración (si lo soporta)
-      try { navigator.vibrate && navigator.vibrate([60, 30, 60]); } catch {}
+      // 🔉 tono + vibración específicos
+      NotifyFX.play(cat);
       // Notificación nativa del navegador (si dieron permiso)
       try {
-        if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification(n.title || 'Mi Casa', { body: n.body || '', icon: '/manifest.json', tag: n.id });
+        if ('Notification' in window && Notification.permission === 'granted' && document.hidden) {
+          const native = new Notification(n.title || 'Mi Casa', {
+            body: n.body || '',
+            icon: '/icon-192.png',
+            badge: '/icon-192.png',
+            tag: 'mc-' + (n.id || Date.now()),
+            vibrate: NotifyFX.pattern(cat),
+            data: { link: n.link || '/' }
+          });
+          native.onclick = () => { try { window.focus(); } catch {} native.close(); };
         }
       } catch {}
       softRefresh();
@@ -254,13 +265,120 @@ function softRefresh() {
   try { render(); } catch {}
 }
 
-// Solicita permiso para notificaciones nativas (1 vez)
-function askNotificationPermission() {
-  try {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().catch(()=>{});
+// =================== 🔔 NOTIFY FX (sonido + vibración por categoría) ===================
+const NotifyFX = (() => {
+  const PREF_KEY = 'mc_notif_prefs_v1';
+  const ASKED_KEY = 'mc_notif_asked_v1';
+
+  function getPrefs() {
+    try { return JSON.parse(localStorage.getItem(PREF_KEY)) || { sound: true, vibration: true }; }
+    catch { return { sound: true, vibration: true }; }
+  }
+  function setPrefs(p) {
+    try { localStorage.setItem(PREF_KEY, JSON.stringify(p)); } catch {}
+  }
+
+  // Mapa tipo backend → categoría visual/sonora
+  function categoryOf(type) {
+    const t = String(type || '').toLowerCase();
+    if (t.includes('announcement')) return 'announcement';
+    if (t.includes('damage')) return 'damage';
+    if (t.includes('payment') || t.includes('paid')) return 'payment';
+    if (t.includes('utility') || t.includes('bill')) return 'bill';
+    if (t.includes('expir') || t.includes('vencim') || t.includes('due') || t.includes('overdue')) return 'expiry';
+    if (t.includes('chore') || t.includes('task')) return 'task';
+    if (t.includes('poll') || t.includes('vote')) return 'poll';
+    return 'default';
+  }
+
+  // Patrones de vibración (ms)
+  const PATTERNS = {
+    announcement: [80, 40, 80],
+    damage:       [220, 80, 220, 80, 220],
+    payment:      [40, 30, 40, 30, 40, 30, 120],
+    bill:         [120, 60, 120],
+    expiry:       [300, 100, 300],
+    task:         [60, 40, 60],
+    poll:         [50, 30, 50, 30, 50],
+    default:      [80]
+  };
+
+  // Secuencias de notas (frecuencia Hz, duración s, [delay s])
+  const TONES = {
+    announcement: [{ f: 880, d: 0.12 }, { f: 1175, d: 0.18, t: 0.10 }],
+    damage:       [{ f: 440, d: 0.18 }, { f: 330, d: 0.18, t: 0.20 }, { f: 440, d: 0.22, t: 0.40 }],
+    payment:      [{ f: 784, d: 0.10 }, { f: 988, d: 0.10, t: 0.10 }, { f: 1319, d: 0.20, t: 0.20 }],
+    bill:         [{ f: 659, d: 0.14 }, { f: 988, d: 0.18, t: 0.14 }],
+    expiry:       [{ f: 698, d: 0.30 }, { f: 587, d: 0.30, t: 0.32 }],
+    task:         [{ f: 1047, d: 0.12 }],
+    poll:         [{ f: 880, d: 0.10 }, { f: 1047, d: 0.10, t: 0.10 }],
+    default:      [{ f: 880, d: 0.14 }]
+  };
+
+  let _ctx = null;
+  function ctx() {
+    if (_ctx) return _ctx;
+    try {
+      const A = window.AudioContext || window.webkitAudioContext;
+      if (A) _ctx = new A();
+    } catch {}
+    return _ctx;
+  }
+
+  function playTone(cat) {
+    const c = ctx(); if (!c) return;
+    if (c.state === 'suspended') { try { c.resume(); } catch {} }
+    const seq = TONES[cat] || TONES.default;
+    const start = c.currentTime;
+    seq.forEach(n => {
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = n.f;
+      const t0 = start + (n.t || 0);
+      const t1 = t0 + n.d;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t1);
+      osc.connect(gain).connect(c.destination);
+      osc.start(t0); osc.stop(t1 + 0.02);
+    });
+  }
+
+  function vibrate(cat) {
+    try { navigator.vibrate && navigator.vibrate(PATTERNS[cat] || PATTERNS.default); } catch {}
+  }
+
+  function play(cat) {
+    const p = getPrefs();
+    if (p.sound) playTone(cat);
+    if (p.vibration) vibrate(cat);
+  }
+
+  // Pide permiso una sola vez. Devuelve el estado.
+  async function ensurePermission(force = false) {
+    if (!('Notification' in window)) return 'unsupported';
+    if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+      return Notification.permission;
     }
-  } catch {}
+    if (!force && localStorage.getItem(ASKED_KEY) === '1') return 'default';
+    try {
+      const res = await Notification.requestPermission();
+      try { localStorage.setItem(ASKED_KEY, '1'); } catch {}
+      return res;
+    } catch { return 'default'; }
+  }
+
+  return {
+    categoryOf, play, playTone, vibrate, pattern: (c) => PATTERNS[c] || PATTERNS.default,
+    getPrefs, setPrefs, ensurePermission, PATTERNS, TONES
+  };
+})();
+
+// Solicita permiso para notificaciones nativas (1 vez por dispositivo)
+function askNotificationPermission() {
+  // Diferimos un poco para que no bloquee el primer paint
+  setTimeout(() => { NotifyFX.ensurePermission(false); }, 800);
 }
 
 // ===================== RENDER ROOT =====================
@@ -1800,8 +1918,67 @@ function viewSettings(c) {
     el('button', { class:'btn ghost', onclick:()=> setTheme(state.theme==='dark'?'light':'dark') },
       state.theme==='dark' ? '☀️ Modo claro' : '🌙 Modo oscuro'),
     el('hr'),
+    renderNotifySettings(),
+    el('hr'),
     el('button', { class:'btn danger', onclick: logout }, '🚪 Cerrar sesión')
   ));
+}
+
+function renderNotifySettings() {
+  const wrap = el('div', {});
+  function paint() {
+    wrap.innerHTML = '';
+    const prefs = NotifyFX.getPrefs();
+    const perm = ('Notification' in window) ? Notification.permission : 'unsupported';
+    const permLabel = {
+      granted: '✅ Permitidas',
+      denied:  '⛔ Bloqueadas (actívalas desde ajustes del navegador)',
+      default: '⏳ Sin decidir',
+      unsupported: '🚫 No soportado en este dispositivo'
+    }[perm];
+
+    const toggle = (label, key) => el('label',
+      { style:{ display:'flex', alignItems:'center', gap:'10px', margin:'8px 0' } },
+      el('input', {
+        type:'checkbox',
+        checked: !!prefs[key],
+        onchange: (e) => { prefs[key] = e.target.checked; NotifyFX.setPrefs(prefs); paint(); }
+      }),
+      el('span', {}, label)
+    );
+
+    const testBtn = (cat, emoji, label) => el('button', {
+      class:'btn sm ghost',
+      style:{ margin:'4px 4px 0 0' },
+      onclick: () => NotifyFX.play(cat)
+    }, emoji + ' ' + label);
+
+    wrap.append(
+      el('h3', {}, '🔔 Notificaciones'),
+      el('p', { style:{ margin:'4px 0', color:'var(--text-muted)' } },
+        'Permiso del sistema: ' + permLabel),
+      perm === 'default' && el('button', {
+        class:'btn sm', style:{ marginBottom:'8px' },
+        onclick: async () => { await NotifyFX.ensurePermission(true); paint(); }
+      }, '🔓 Activar notificaciones'),
+      toggle('🔉 Reproducir tono', 'sound'),
+      toggle('📳 Vibrar', 'vibration'),
+      el('div', { style:{ marginTop:'8px', fontSize:'13px', color:'var(--text-muted)' } },
+        'Probar tonos por categoría:'),
+      el('div', { style:{ display:'flex', flexWrap:'wrap', marginTop:'4px' } },
+        testBtn('announcement', '📢', 'Aviso'),
+        testBtn('damage',       '🛠️', 'Daño'),
+        testBtn('payment',      '💸', 'Pago'),
+        testBtn('bill',         '⚡', 'Factura'),
+        testBtn('expiry',       '⏳', 'Vencimiento'),
+        testBtn('task',         '✅', 'Tarea'),
+        testBtn('poll',         '🗳️', 'Encuesta'),
+        testBtn('default',      '🔔', 'Genérica')
+      )
+    );
+  }
+  paint();
+  return wrap;
 }
 
 function openEditMyAccount() {
