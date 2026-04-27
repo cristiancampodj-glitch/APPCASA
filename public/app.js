@@ -1460,9 +1460,15 @@ async function openComposeAnnouncement() {
 function viewSettings(c) {
   c.append(el('div', { class:'topbar' }, el('h1', {}, '⚙️ Ajustes')));
   c.append(el('div', { class:'detail-section' },
-    el('h3', {}, '👤 Mi cuenta'),
+    el('h3', {}, '👤 Mi cuenta',
+      el('button', {
+        class:'btn sm', style:{ marginLeft:'auto' },
+        onclick: openEditMyAccount
+      }, '✏️ Editar')
+    ),
     el('p', {}, el('b', {}, 'Nombre: '), state.user.full_name),
     el('p', {}, el('b', {}, 'Correo: '), state.user.email),
+    state.user.phone && el('p', {}, el('b', {}, 'Teléfono: '), state.user.phone),
     el('p', {}, el('b', {}, 'Rol: '), state.user.role),
     el('hr'),
     el('h3', {}, '🎨 Apariencia'),
@@ -1470,6 +1476,54 @@ function viewSettings(c) {
       state.theme==='dark' ? '☀️ Modo claro' : '🌙 Modo oscuro'),
     el('hr'),
     el('button', { class:'btn danger', onclick: logout }, '🚪 Cerrar sesión')
+  ));
+}
+
+function openEditMyAccount() {
+  const u = state.user;
+  const m = modal(el('div', {},
+    el('h3', {}, '✏️ Editar mi cuenta'),
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        const payload = {};
+        if (data.full_name) payload.full_name = data.full_name;
+        if (data.email)     payload.email = data.email;
+        if (data.phone !== undefined) payload.phone = data.phone;
+        const newPwd = (data.password || '').trim();
+        const confirmPwd = (data.password_confirm || '').trim();
+        if (newPwd) {
+          if (newPwd.length < 6) return toast('La contraseña debe tener al menos 6 caracteres', 'error');
+          if (newPwd !== confirmPwd) return toast('Las contraseñas no coinciden', 'error');
+          payload.password = newPwd;
+        }
+        try {
+          const r = await API.patch(`/api/users/${u.id}`, payload);
+          // Actualizar estado local
+          Object.assign(state.user, {
+            full_name: r.user.full_name,
+            email: r.user.email,
+            phone: r.user.phone
+          });
+          m.close();
+          toast('Datos actualizados ✅', 'success');
+          render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('full_name', 'Nombre completo', 'text', false, u.full_name || ''),
+        field('email', 'Correo', 'email', false, u.email || ''),
+        field('phone', 'Teléfono', 'tel', false, u.phone || ''),
+        el('hr', { style:{ borderColor:'var(--border)', margin:'12px 0' } }),
+        el('p', { style:{ color:'var(--text-muted)', fontSize:'13px', marginBottom:'8px' } },
+          'Cambiar contraseña (opcional)'),
+        field('password', 'Nueva contraseña (mín 6)', 'password'),
+        field('password_confirm', 'Confirmar contraseña', 'password'),
+        el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar cambios')
+      );
+      return f;
+    })()
   ));
 }
 
