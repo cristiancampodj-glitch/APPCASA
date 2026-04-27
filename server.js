@@ -42,7 +42,10 @@ app.use(helmet({
   frameguard: { action: 'deny' }
 }));
 app.use(cors({ origin: true, credentials: true }));
-app.use(compression());
+app.use(compression({
+  // No comprimir SSE: rompe el flushing en tiempo real
+  filter: (req, res) => req.path && req.path.startsWith('/api/realtime') ? false : compression.filter(req, res)
+}));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -70,6 +73,7 @@ app.use('/api/events',        require('./src/routes/events'));
 app.use('/api/bookings',      require('./src/routes/bookings'));
 app.use('/api/polls',         require('./src/routes/polls'));
 app.use('/api/notifications', require('./src/routes/notifications'));
+app.use('/api/realtime',      require('./src/routes/realtime'));
 app.use('/api/dashboard',     require('./src/routes/dashboard'));
 app.use('/api/ai',            require('./src/routes/ai'));
 app.use('/api/admin',         require('./src/routes/admin'));
@@ -81,16 +85,28 @@ app.use('/api/utility-bills', require('./src/routes/utilityBills'));
 app.use('/webhooks', require('./src/routes/webhooks'));
 
 // --- Frontend estático (PWA) ---
+// El HTML/JS/CSS principal NO se cachea para que cada deploy se vea al instante.
+// Imágenes y fuentes sí se cachean fuerte (no cambian).
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, {
-  maxAge: '1h',
+  etag: true,
+  lastModified: true,
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
+    if (/\.(html|js|css|json)$/i.test(filePath) || filePath.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    } else {
+      res.setHeader('Cache-Control', 'public, max-age=2592000, immutable'); // 30 días
+    }
   }
 }));
 
-// SPA fallback
-app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+// SPA fallback — también sin caché para recibir cambios al recargar
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
 
 // --- Manejo errores ---
 app.use((err, req, res, next) => {

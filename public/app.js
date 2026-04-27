@@ -169,10 +169,84 @@ async function boot() {
     state.user = user;
     // Refrescar token cada 6 horas mientras la pestaña esté abierta
     setInterval(() => API.refresh(), 6 * 60 * 60 * 1000);
+    // 🔔 Conectar canal en tiempo real (SSE)
+    connectRealtime();
+    // 🔄 Refrescar al volver de segundo plano (móvil/PWA)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && state.user) softRefresh();
+    });
   } catch {
     API.setToken(null);
   }
   render();
+}
+
+// ===================== REALTIME (SSE) =====================
+let _sse = null;
+let _sseRetry = 0;
+function connectRealtime() {
+  try { if (_sse) _sse.close(); } catch {}
+  const tk = API.token();
+  if (!tk) return;
+  const url = `/api/realtime/stream?token=${encodeURIComponent(tk)}`;
+  const es = new EventSource(url);
+  _sse = es;
+  es.onopen = () => { _sseRetry = 0; };
+  es.onmessage = (ev) => {
+    let data; try { data = JSON.parse(ev.data); } catch { return; }
+    handleRealtime(data);
+  };
+  es.onerror = () => {
+    try { es.close(); } catch {}
+    _sse = null;
+    // Reintento exponencial con tope
+    _sseRetry = Math.min(_sseRetry + 1, 6);
+    setTimeout(connectRealtime, 1000 * Math.pow(2, _sseRetry));
+  };
+}
+
+function handleRealtime(ev) {
+  if (!ev || !ev.type) return;
+  switch (ev.type) {
+    case 'hello':
+      // primer mensaje de bienvenida
+      break;
+    case 'notification': {
+      const n = ev.notification || {};
+      toast(n.title + (n.body ? ' — ' + n.body : ''), 'info');
+      // 🔉 sonidito + vibración (si lo soporta)
+      try { navigator.vibrate && navigator.vibrate([60, 30, 60]); } catch {}
+      // Notificación nativa del navegador (si dieron permiso)
+      try {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(n.title || 'Mi Casa', { body: n.body || '', icon: '/manifest.json', tag: n.id });
+        }
+      } catch {}
+      softRefresh();
+      break;
+    }
+    case 'damage_created':
+    case 'damage_updated':
+    case 'payment_paid':
+    case 'announcement_created':
+      softRefresh();
+      break;
+  }
+}
+
+// Re-renderiza la vista actual sin perder estado
+function softRefresh() {
+  if (!state.user) return;
+  try { render(); } catch {}
+}
+
+// Solicita permiso para notificaciones nativas (1 vez)
+function askNotificationPermission() {
+  try {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(()=>{});
+    }
+  } catch {}
 }
 
 // ===================== RENDER ROOT =====================
@@ -205,9 +279,18 @@ function renderAuth() {
       const fd = Object.fromEntries(new FormData(form));
       try {
         const data = await API.post('/api/auth/' + mode, fd);
+        // Registro queda pendiente de aprobación
+        if (data && data.pending) {
+          toast(data.message || 'Tu solicitud fue recibida. Te avisaremos cuando un administrador la apruebe.', 'success');
+          mode = 'login';
+          paint();
+          return;
+        }
         API.setToken(data.token);
         state.user = data.user;
         toast('¡Bienvenido!', 'success');
+        connectRealtime();
+        askNotificationPermission();
         render();
       } catch (err) { toast(err.message, 'error'); }
     }});

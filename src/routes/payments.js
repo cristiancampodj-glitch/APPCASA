@@ -3,6 +3,7 @@ const { query } = require('../db');
 const { requireAuth, requireRole, audit } = require('../middleware');
 const mp = require('../services/mercadopago');
 const pdf = require('../services/pdf');
+const rt = require('../services/realtime');
 
 // ---------- Cálculo de intereses de mora ------------------------------
 // Reglas:
@@ -250,6 +251,22 @@ router.patch('/:id/pay', requireAuth, async (req, res, next) => {
     audit(req, 'mark_paid', 'payments', req.params.id, {
       late_fee: calc.late_fee, days_late: calc.days_late
     });
+
+    // 🔔 Notificar a la otra parte (inquilino ↔ dueño)
+    const isTenant = req.user.role === 'tenant';
+    const targetUserId = isTenant ? p.owner_id : p.tenant_id;
+    if (targetUserId) {
+      rt.notify(targetUserId, {
+        type: isTenant ? 'payment_due' : 'system',
+        title: isTenant
+          ? `💰 ${req.user.full_name || 'El inquilino'} subió un comprobante`
+          : `✅ Tu pago fue confirmado`,
+        body: `Total: ${finalAmount}${calc.late_fee > 0 ? ` (incluye mora ${calc.late_fee})` : ''}`,
+        link: '/#payments'
+      });
+    }
+    rt.publishToHouse(p.house_id, { type: 'payment_paid', payment: r.rows[0] });
+
     res.json({ payment: decoratePayment(r.rows[0]) });
   } catch (e) { next(e); }
 });

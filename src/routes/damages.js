@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { requireAuth, audit } = require('../middleware');
+const rt = require('../services/realtime');
 
 router.get('/', requireAuth, async (req, res, next) => {
   try {
@@ -50,7 +51,23 @@ router.post('/', requireAuth, async (req, res, next) => {
         [r.rows[0].id, url, req.user.id]);
     }
     audit(req, 'create_damage', 'damages', r.rows[0].id);
-    res.status(201).json({ damage: r.rows[0] });
+
+    // 🔔 Notificar en tiempo real al dueño de la propiedad
+    const damage = r.rows[0];
+    const own = await query('SELECT owner_id, name, unit_label FROM houses WHERE id = $1', [damage.house_id]);
+    const ownerId = own.rows[0] && own.rows[0].owner_id;
+    const houseLabel = own.rows[0] ? (own.rows[0].unit_label || own.rows[0].name) : '';
+    if (ownerId) {
+      rt.notify(ownerId, {
+        type: 'damage',
+        title: `🛠️ Nuevo daño reportado en ${houseLabel}`,
+        body: `${req.user.full_name || 'El inquilino'}: ${damage.title}`,
+        link: '/#damages'
+      });
+    }
+    rt.publishToHouse(damage.house_id, { type: 'damage_created', damage });
+
+    res.status(201).json({ damage });
   } catch (e) { next(e); }
 });
 
@@ -81,6 +98,20 @@ router.patch('/:id', requireAuth, async (req, res, next) => {
       [req.params.id, status, final_cost, req.user.id]
     );
     audit(req, 'update_damage', 'damages', req.params.id, { status });
+
+    // 🔔 Notificar al inquilino que reportó cuando el dueño cambia el estado
+    if (status && row.reported_by && row.reported_by !== req.user.id) {
+      rt.notify(row.reported_by, {
+        type: 'damage',
+        title: status === 'resolved' ? '✅ Tu daño fue marcado como resuelto'
+             : status === 'in_progress' ? '🔧 Tu daño ya está en proceso'
+             : `Estado de tu daño: ${status}`,
+        body: r.rows[0].title,
+        link: '/#damages'
+      });
+    }
+    rt.publishToHouse(row.house_id, { type: 'damage_updated', damage: r.rows[0] });
+
     res.json({ damage: r.rows[0] });
   } catch (e) { next(e); }
 });
