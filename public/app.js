@@ -598,7 +598,6 @@ function openCreatePayment(house) {
         data.period_month = Number(data.period_month);
         data.period_year = Number(data.period_year);
         data.tenant_id = tenant.id;
-        data.contract_id = tenant.id; // simplificado
         try {
           await API.post('/api/payments', data);
           m.close(); toast('Cobro creado ✅', 'success');

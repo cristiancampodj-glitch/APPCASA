@@ -29,14 +29,49 @@ router.get('/', requireAuth, async (req, res, next) => {
 // POST /api/payments — owner genera cobro
 router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
   try {
-    const { contract_id, tenant_id, period_month, period_year, amount, due_date, notes, currency } = req.body;
+    const { tenant_id, period_month, period_year, amount, due_date, notes, currency } = req.body;
+    let { contract_id } = req.body;
     const cur = (currency || '').toUpperCase() || null; // null deja al trigger heredar de la casa
+    const house_id = req.user.house_id;
+
+    // Validar contract_id si vino, o resolver/crear el contrato a partir de house+tenant
+    if (contract_id) {
+      const c = await query(
+        'SELECT id FROM contracts WHERE id = $1 AND house_id = $2 AND tenant_id = $3',
+        [contract_id, house_id, tenant_id]
+      );
+      if (!c.rows[0]) contract_id = null;
+    }
+    if (!contract_id) {
+      const existing = await query(
+        `SELECT id FROM contracts
+         WHERE house_id = $1 AND tenant_id = $2 AND status = 'active'
+         ORDER BY created_at DESC LIMIT 1`,
+        [house_id, tenant_id]
+      );
+      if (existing.rows[0]) {
+        contract_id = existing.rows[0].id;
+      } else {
+        const h = await query('SELECT monthly_rent, payment_day FROM houses WHERE id = $1', [house_id]);
+        const monthlyRent = Number(h.rows[0]?.monthly_rent) || Number(amount) || 0;
+        const paymentDay = h.rows[0]?.payment_day || 5;
+        const startDate = due_date || new Date().toISOString().slice(0, 10);
+        const created = await query(
+          `INSERT INTO contracts (house_id, tenant_id, start_date, monthly_rent, payment_day, status)
+           VALUES ($1, $2, $3, $4, $5, 'active')
+           RETURNING id`,
+          [house_id, tenant_id, startDate, monthlyRent, paymentDay]
+        );
+        contract_id = created.rows[0].id;
+      }
+    }
+
     const r = await query(
       `INSERT INTO payments (contract_id, tenant_id, house_id, period_month, period_year, amount, due_date, notes, currency)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9, (SELECT currency FROM houses WHERE id=$3), 'COP'))
        ON CONFLICT (contract_id, period_month, period_year) DO UPDATE SET amount = EXCLUDED.amount, currency = EXCLUDED.currency
        RETURNING *`,
-      [contract_id, tenant_id, req.user.house_id, period_month, period_year, amount, due_date, notes || null, cur]
+      [contract_id, tenant_id, house_id, period_month, period_year, amount, due_date, notes || null, cur]
     );
     audit(req, 'create_payment', 'payments', r.rows[0].id);
     res.status(201).json({ payment: r.rows[0] });
