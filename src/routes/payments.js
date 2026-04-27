@@ -52,9 +52,9 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
       if (existing.rows[0]) {
         contract_id = existing.rows[0].id;
       } else {
-        const h = await query('SELECT monthly_rent, payment_day FROM houses WHERE id = $1', [house_id]);
+        const h = await query('SELECT monthly_rent, rent_due_day FROM houses WHERE id = $1', [house_id]);
         const monthlyRent = Number(h.rows[0]?.monthly_rent) || Number(amount) || 0;
-        const paymentDay = h.rows[0]?.payment_day || 5;
+        const paymentDay = h.rows[0]?.rent_due_day || 5;
         const startDate = due_date || new Date().toISOString().slice(0, 10);
         const created = await query(
           `INSERT INTO contracts (house_id, tenant_id, start_date, monthly_rent, payment_day, status)
