@@ -121,7 +121,7 @@ async function step3RemindRent() {
 async function step4RemindUtilityShares() {
   // Recordatorios de cuotas de servicios (utility_bill_shares)
   const r = await query(`
-    SELECT s.id, s.amount, b.due_date, b.type AS utility_type, b.currency,
+    SELECT s.id, s.amount, b.due_date, b.type AS utility_type,
            u.id AS uid, u.full_name, u.phone,
            (b.due_date - CURRENT_DATE)::int AS days_left
       FROM utility_bill_shares s

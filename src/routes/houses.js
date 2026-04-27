@@ -8,18 +8,18 @@ router.get('/', requireAuth, async (req, res, next) => {
   try {
     const isOwner = ['owner', 'admin'].includes(req.user.role);
 
-    // Para inquilinos sin house_id devolvemos lista vacía (no podemos consultar)
     if (!isOwner && !req.user.house_id) {
       return res.json({ houses: [] });
     }
 
-    const where = isOwner
-      ? `(h.owner_id = $1::uuid OR h.id = $2::uuid)`
-      : `h.id = $2::uuid`;
-    const params = [
-      isOwner ? req.user.id : '00000000-0000-0000-0000-000000000000',
-      req.user.house_id || '00000000-0000-0000-0000-000000000000'
-    ];
+    let where, params;
+    if (isOwner) {
+      where = `(h.owner_id = $1::uuid OR h.id = $2::uuid)`;
+      params = [req.user.id, req.user.house_id || '00000000-0000-0000-0000-000000000000'];
+    } else {
+      where = `h.id = $1::uuid`;
+      params = [req.user.house_id];
+    }
 
     const r = await query(`
       SELECT
