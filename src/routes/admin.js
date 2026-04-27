@@ -34,4 +34,52 @@ router.get('/audit', requireAuth, requireRole('admin','owner'), async (req, res,
   } catch (e) { next(e); }
 });
 
+// GET /api/admin/integrity — listar inconsistencias casa-inquilino
+router.get('/integrity', requireAuth, requireRole('admin','owner'), async (req, res, next) => {
+  try {
+    const payments = await query(
+      `SELECT p.id, p.house_id AS payment_house, u.house_id AS tenant_house,
+              u.full_name AS tenant_name, p.amount, p.period_month, p.period_year
+       FROM payments p
+       JOIN users u ON u.id = p.tenant_id
+       WHERE p.house_id <> u.house_id`
+    );
+    const contracts = await query(
+      `SELECT c.id, c.house_id AS contract_house, u.house_id AS tenant_house,
+              u.full_name AS tenant_name
+       FROM contracts c
+       JOIN users u ON u.id = c.tenant_id
+       WHERE c.house_id <> u.house_id`
+    );
+    res.json({
+      payments_mismatch: payments.rows,
+      contracts_mismatch: contracts.rows
+    });
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/integrity/fix — repara los pagos/contratos mal asignados
+router.post('/integrity/fix', requireAuth, requireRole('admin','owner'), async (req, res, next) => {
+  try {
+    const p = await query(
+      `UPDATE payments p
+       SET house_id = u.house_id
+       FROM users u
+       WHERE p.tenant_id = u.id AND p.house_id <> u.house_id
+       RETURNING p.id`
+    );
+    const c = await query(
+      `UPDATE contracts c
+       SET house_id = u.house_id
+       FROM users u
+       WHERE c.tenant_id = u.id AND c.house_id <> u.house_id
+       RETURNING c.id`
+    );
+    res.json({
+      payments_fixed: p.rowCount,
+      contracts_fixed: c.rowCount
+    });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;
