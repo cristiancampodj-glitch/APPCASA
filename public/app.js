@@ -144,6 +144,19 @@ function fmtMoney(n, currency) {
   } catch { return cur + ' ' + (Number(n)||0).toLocaleString(); }
 }
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString('es-CO',{ day:'2-digit', month:'short', year:'numeric' }) : '—';
+function describeExpiry(s) {
+  if (!s) return '';
+  const ms = new Date(s).getTime() - Date.now();
+  if (isNaN(ms)) return '';
+  if (ms <= 0) return 'Vencido';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `Vence en ${mins} min`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `Vence en ${hrs} h`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `Vence en ${days} día${days>1?'s':''}`;
+  return `Vence ${fmtDate(s)}`;
+}
 const PAY_STATUS_ES = { paid:'Pagado', pending:'Pendiente', overdue:'En mora', partial:'Parcial', cancelled:'Cancelado' };
 const fmtPayStatus = (s) => PAY_STATUS_ES[s] || s || '';
 
@@ -1565,7 +1578,8 @@ async function viewAnnouncements(c) {
           el('div', { class:'name' }, (a.pinned ? '📌 ' : '') + a.title),
           el('div', { style:{ marginTop:'4px', fontSize:'15px', whiteSpace:'pre-wrap' } }, a.body),
           el('div', { class:'meta', style:{ marginTop:'6px' } },
-            (a.author_name || '') + ' · ' + fmtDate(a.created_at))
+            (a.author_name || '') + ' · ' + fmtDate(a.created_at) +
+            (a.expires_at ? ' · ⏳ ' + describeExpiry(a.expires_at) : ''))
         ),
         el('div', { class:'list-actions' },
           badge,
@@ -1668,6 +1682,22 @@ async function openComposeAnnouncement() {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(f));
         const payload = { title: data.title, body: data.body, pinned: !!data.pinned };
+
+        // ⏳ Calcular expires_at según selección
+        const sel = (f._expiresWrap && f._expiresWrap.dataset.value) || '';
+        if (sel === 'custom') {
+          const v = f._expiresCustom && f._expiresCustom.value;
+          if (!v) return toast('Elige una fecha de vencimiento', 'error');
+          const d = new Date(v);
+          if (isNaN(d.getTime()) || d.getTime() <= Date.now()) {
+            return toast('La fecha debe ser futura', 'error');
+          }
+          payload.expires_at = d.toISOString();
+        } else if (sel) {
+          const days = Number(sel);
+          payload.expires_at = new Date(Date.now() + days * 86400000).toISOString();
+        }
+
         if (isOwner) {
           payload.scope = scope;
           if (scope === 'house') {
@@ -1695,6 +1725,51 @@ async function openComposeAnnouncement() {
           el('textarea', { name:'body', rows:5, required:true,
             placeholder:'Escribe el mensaje aquí…' })
         ),
+        // ⏳ Duración del aviso (rápido + personalizado)
+        (() => {
+          const wrap = el('div', { class:'field' });
+          const customInput = el('input', {
+            type:'datetime-local', name:'expires_at_custom',
+            style:{ display:'none', marginTop:'8px' }
+          });
+          const chips = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' } });
+          const opts = [
+            { v:'',     label:'♾️ Sin vencer' },
+            { v:'1',    label:'1 día' },
+            { v:'3',    label:'3 días' },
+            { v:'7',    label:'1 semana' },
+            { v:'30',   label:'1 mes' },
+            { v:'custom', label:'📅 Fecha…' }
+          ];
+          let selected = '';
+          opts.forEach(o => {
+            const b = el('button', {
+              type:'button',
+              class:'btn sm ' + (selected === o.v ? 'success' : 'ghost'),
+              onclick: () => {
+                selected = o.v;
+                [...chips.children].forEach(x => { x.classList.remove('success'); x.classList.add('ghost'); });
+                b.classList.remove('ghost'); b.classList.add('success');
+                customInput.style.display = (o.v === 'custom') ? 'block' : 'none';
+                wrap.dataset.value = o.v;
+              }
+            }, o.label);
+            chips.append(b);
+          });
+          // Por defecto "sin vencer"
+          chips.firstChild.classList.remove('ghost');
+          chips.firstChild.classList.add('success');
+          wrap.dataset.value = '';
+          wrap.append(
+            el('label', {}, '⏳ ¿Cuánto tiempo dura el aviso?'),
+            chips,
+            customInput
+          );
+          // Guardamos referencias para el submit
+          f._expiresWrap = wrap;
+          f._expiresCustom = customInput;
+          return wrap;
+        })(),
         el('label', { style:{ display:'flex', alignItems:'center', gap:'8px', margin:'8px 0 16px' } },
           el('input', { type:'checkbox', name:'pinned', value:'1' }),
           el('span', {}, '📌 Fijar este aviso arriba')

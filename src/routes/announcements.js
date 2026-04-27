@@ -63,6 +63,7 @@ router.get('/', requireAuth, async (req, res, next) => {
          LEFT JOIN users tu ON tu.id = a.target_user_id
          WHERE a.house_id = $2
            AND (a.target_user_id IS NULL OR a.target_user_id = $1)
+           AND (a.expires_at IS NULL OR a.expires_at > NOW())
          ORDER BY a.pinned DESC, a.created_at DESC`;
     const params = isOwner ? [req.user.id] : [req.user.id, req.user.house_id];
     const r = await query(sql, params);
@@ -78,17 +79,26 @@ router.get('/', requireAuth, async (req, res, next) => {
 //  - target_user_id (req cuando scope=user)
 router.post('/', requireAuth, async (req, res, next) => {
   try {
-    const { title, body, pinned, scope, house_id, target_user_id } = req.body;
+    const { title, body, pinned, scope, house_id, target_user_id, expires_at } = req.body;
     if (!title || !body) return res.status(400).json({ error: 'Faltan título o cuerpo' });
+
+    // Validar fecha de vencimiento si viene
+    let exp = null;
+    if (expires_at) {
+      const d = new Date(expires_at);
+      if (isNaN(d.getTime())) return res.status(400).json({ error: 'Fecha de vencimiento inválida' });
+      if (d.getTime() < Date.now() - 60_000) return res.status(400).json({ error: 'La fecha de vencimiento ya pasó' });
+      exp = d;
+    }
 
     const isOwner = ['owner', 'admin'].includes(req.user.role);
 
     // Inquilino solo puede publicar en su propia casa, sin target (chat de casa)
     if (!isOwner) {
       const r = await query(
-        `INSERT INTO announcements (house_id, author_id, title, body, pinned)
-         VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-        [req.user.house_id, req.user.id, title, body, !!pinned]
+        `INSERT INTO announcements (house_id, author_id, title, body, pinned, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+        [req.user.house_id, req.user.id, title, body, !!pinned, exp]
       );
       pushAnnouncement(r.rows[0], { houseId: req.user.house_id, authorId: req.user.id, title, body });
       return res.status(201).json({ announcement: r.rows[0], count: 1 });
@@ -104,9 +114,9 @@ router.post('/', requireAuth, async (req, res, next) => {
       const inserted = [];
       for (const h of houses.rows) {
         const r = await query(
-          `INSERT INTO announcements (house_id, author_id, title, body, pinned)
-           VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-          [h.id, req.user.id, title, body, !!pinned]
+          `INSERT INTO announcements (house_id, author_id, title, body, pinned, expires_at)
+           VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+          [h.id, req.user.id, title, body, !!pinned, exp]
         );
         inserted.push(r.rows[0]);
         pushAnnouncement(r.rows[0], { houseId: h.id, authorId: req.user.id, title, body });
@@ -125,9 +135,9 @@ router.post('/', requireAuth, async (req, res, next) => {
         return res.status(403).json({ error: 'Inquilino no encontrado en tus propiedades' });
       }
       const r = await query(
-        `INSERT INTO announcements (house_id, author_id, title, body, pinned, target_user_id)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [u.rows[0].house_id, req.user.id, title, body, !!pinned, target_user_id]
+        `INSERT INTO announcements (house_id, author_id, title, body, pinned, target_user_id, expires_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [u.rows[0].house_id, req.user.id, title, body, !!pinned, target_user_id, exp]
       );
       pushAnnouncement(r.rows[0], { targetUserId: target_user_id, authorId: req.user.id, title, body });
       return res.status(201).json({ announcement: r.rows[0], count: 1 });
@@ -139,9 +149,9 @@ router.post('/', requireAuth, async (req, res, next) => {
     const own = await query(`SELECT 1 FROM houses WHERE id=$1 AND owner_id=$2`, [targetHouse, req.user.id]);
     if (!own.rows[0]) return res.status(403).json({ error: 'Propiedad no autorizada' });
     const r = await query(
-      `INSERT INTO announcements (house_id, author_id, title, body, pinned)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [targetHouse, req.user.id, title, body, !!pinned]
+      `INSERT INTO announcements (house_id, author_id, title, body, pinned, expires_at)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [targetHouse, req.user.id, title, body, !!pinned, exp]
     );
     pushAnnouncement(r.rows[0], { houseId: targetHouse, authorId: req.user.id, title, body });
     res.status(201).json({ announcement: r.rows[0], count: 1 });
