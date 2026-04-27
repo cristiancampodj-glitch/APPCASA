@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { requireAuth, requireRole } = require('../middleware');
+const cronJobs = require('../scripts/cron');
 
 // Panel superadmin
 router.get('/stats', requireAuth, requireRole('admin'), async (req, res, next) => {
@@ -79,6 +80,14 @@ router.post('/integrity/fix', requireAuth, requireRole('admin','owner'), async (
       payments_fixed: p.rowCount,
       contracts_fixed: c.rowCount
     });
+  } catch (e) { next(e); }
+});
+
+// POST /api/admin/run-cron — ejecuta tareas programadas manualmente
+router.post('/run-cron', requireAuth, requireRole('admin','owner'), async (req, res, next) => {
+  try {
+    await cronJobs.runAll();
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

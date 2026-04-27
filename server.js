@@ -76,3 +76,21 @@ app.listen(PORT, () => {
   console.log(`Mi Casa v3 escuchando en puerto ${PORT}`);
   console.log(`Health: http://localhost:${PORT}/api/health`);
 });
+
+// --- Scheduler interno: corre tareas diarias sin necesidad de cron externo ---
+const cronJobs = require('./src/scripts/cron');
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+async function runDailyJobs() {
+  try {
+    console.log('[scheduler] Ejecutando tareas diarias…');
+    await cronJobs.step1MarkOverdue();
+    await cronJobs.step2GenerateNextRentPayments();
+    await cronJobs.step3RemindRent();
+    await cronJobs.step4RemindUtilityShares();
+  } catch (e) {
+    console.error('[scheduler] Error:', e.message);
+  }
+}
+// Primera corrida 30s después de arrancar y luego cada 24h
+setTimeout(runDailyJobs, 30 * 1000);
+setInterval(runDailyJobs, ONE_DAY_MS);
