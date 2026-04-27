@@ -19,7 +19,19 @@ const API = {
   get(p)     { return this.req(p); },
   post(p, b) { return this.req(p, { method:'POST', body: b }); },
   patch(p,b) { return this.req(p, { method:'PATCH', body: b }); },
-  del(p)     { return this.req(p, { method:'DELETE' }); }
+  del(p)     { return this.req(p, { method:'DELETE' }); },
+  async openPdf(path, filename) {
+    const tk = this.token();
+    const r = await fetch(path, { headers: tk ? { Authorization:`Bearer ${tk}` } : {} });
+    if (!r.ok) throw new Error('No se pudo descargar el PDF');
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.target = '_blank';
+    if (filename) a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=> URL.revokeObjectURL(url), 30000);
+  }
 };
 
 // ===================== UI helpers =====================
@@ -1904,7 +1916,13 @@ function openContractView(ct) {
   if (canCurrentSign) {
     actions.append(el('button', { class:'btn success', onclick: () => openSignaturePad(ct) }, '🖊️ Firmar ahora'));
   }
-  actions.append(el('button', { class:'btn ghost', onclick: () => window.print() }, '🖨️ Imprimir'));
+  actions.append(el('button', {
+    class:'btn ghost',
+    onclick: async () => {
+      try { await API.openPdf(`/api/contracts/${ct.id}/pdf`, `contrato-${ct.id}.pdf`); }
+      catch (e) { toast(e.message, 'error'); }
+    }
+  }, '📄 Descargar PDF'));
 
   modal(el('div', {},
     el('h3', {}, `📄 ${ct.house_name || ''} — ${ct.tenant_name || ''}`),

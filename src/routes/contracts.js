@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { requireAuth, requireRole, audit } = require('../middleware');
+const { generateContract } = require('../services/pdf');
 
 // GET /api/contracts — owner: todos los suyos; tenant: el suyo
 router.get('/', requireAuth, async (req, res, next) => {
@@ -154,6 +155,33 @@ router.post('/:id/sign', requireAuth, async (req, res, next) => {
     const r = await query(sql, params);
     audit(req, 'sign_contract', 'contracts', r.rows[0].id);
     res.json({ contract: r.rows[0] });
+  } catch (e) { next(e); }
+});
+
+// GET /api/contracts/:id/pdf — descarga PDF del contrato
+router.get('/:id/pdf', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT c.*,
+              h.name AS house_name, h.address, h.currency,
+              t.full_name AS tenant_name, t.email AS tenant_email,
+              o.full_name AS owner_name
+         FROM contracts c
+         JOIN houses h ON h.id = c.house_id
+         JOIN users  t ON t.id = c.tenant_id
+         LEFT JOIN users o ON o.id = h.owner_id
+        WHERE c.id = $1`,
+      [req.params.id]
+    );
+    const c = r.rows[0];
+    if (!c) return res.status(404).json({ error: 'Contrato no encontrado' });
+    if (req.user.role === 'tenant' && c.tenant_id !== req.user.id) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="contrato-${c.id}.pdf"`);
+    await generateContract(res, c);
   } catch (e) { next(e); }
 });
 
