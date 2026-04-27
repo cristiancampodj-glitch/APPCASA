@@ -368,10 +368,14 @@ async function viewHouseDetail(c) {
   } else {
     const list = el('div', { class:'list' });
     h.tenants.forEach(t => list.append(el('div', { class:'list-item' },
-      el('div', {},
+      el('div', { style:{ flex:'1' } },
         el('div', { class:'name' }, '👤 ' + t.name),
         el('div', { class:'meta' }, t.email + (t.phone ? ' · ' + t.phone : ''))
-      )
+      ),
+      el('button', {
+        class:'btn sm ghost',
+        onclick: () => openManageTenant(t, h)
+      }, '⚙️ Gestionar')
     )));
     sec1.append(list);
   }
@@ -551,6 +555,61 @@ async function loadDamages(container, house) {  try {
     )));
     container.append(list);
   } catch (e) { container.append(emptyState('⚠️', e.message)); }
+}
+
+// ===================== INVITAR INQUILINO =====================
+function openManageTenant(tenant, house) {
+  const m = modal(el('div', {},
+    el('h3', {}, '⚙️ Gestionar inquilino'),
+    el('p', { style:{ color:'var(--text-muted)', marginBottom:'12px' } },
+      `${tenant.name} · ${house.name || 'Propiedad'}`),
+    (() => {
+      const f = el('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(f));
+        const payload = {};
+        if (data.full_name) payload.full_name = data.full_name;
+        if (data.email) payload.email = data.email;
+        if (data.phone !== undefined) payload.phone = data.phone;
+        if (data.password && data.password.trim().length >= 6) payload.password = data.password.trim();
+        else if (data.password && data.password.trim().length > 0) {
+          return toast('La contraseña debe tener al menos 6 caracteres', 'error');
+        }
+        try {
+          await API.patch(`/api/users/${tenant.id}`, payload);
+          m.close();
+          toast('Datos actualizados ✅', 'success');
+          if (payload.password) {
+            alert(`Nueva contraseña de ${tenant.name}:\n\nCorreo: ${payload.email || tenant.email}\nContraseña: ${payload.password}\n\nCompártela con tu inquilino.`);
+          }
+          state.currentHouseId = null; render();
+        } catch (err) { toast(err.message, 'error'); }
+      }});
+      f.append(
+        field('full_name', 'Nombre completo', 'text', false, tenant.name),
+        field('email', 'Correo', 'email', false, tenant.email),
+        field('phone', 'Teléfono', 'tel', false, tenant.phone || ''),
+        field('password', 'Nueva contraseña (opcional, mín 6)', 'text'),
+        el('p', { style:{ color:'var(--text-muted)', fontSize:'13px', marginTop:'-4px', marginBottom:'12px' } },
+          'Si tu inquilino olvidó su clave, escribe una nueva aquí.'),
+        el('button', { class:'btn lg block', type:'submit' }, '💾 Guardar cambios')
+      );
+      return f;
+    })(),
+    el('hr', { style:{ margin:'16px 0', borderColor:'var(--border)' } }),
+    el('button', {
+      class:'btn lg block danger',
+      onclick: async () => {
+        if (!confirm(`¿Terminar el contrato de ${tenant.name}?\n\nSe desactivará su cuenta y se desasignará de la propiedad. Esta acción se puede revertir desde la base de datos.`)) return;
+        try {
+          await API.post(`/api/users/${tenant.id}/end-contract`, {});
+          m.close();
+          toast('Contrato terminado', 'success');
+          state.currentHouseId = null; render();
+        } catch (err) { toast(err.message, 'error'); }
+      }
+    }, '🚪 Terminar contrato')
+  ));
 }
 
 // ===================== INVITAR INQUILINO =====================
