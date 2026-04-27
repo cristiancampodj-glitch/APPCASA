@@ -79,7 +79,8 @@ router.get('/', requireAuth, async (req, res, next) => {
 //  - house_id (req cuando scope=house o user)
 //  - target_user_id (req cuando scope=user)
 router.post('/', requireAuth, async (req, res, next) => {
-  try {, expires_at } = req.body;
+  try {
+    const { title, body, pinned, scope, house_id, target_user_id, expires_at } = req.body;
     if (!title || !body) return res.status(400).json({ error: 'Faltan título o cuerpo' });
 
     // Validar fecha de vencimiento si viene
@@ -98,25 +99,15 @@ router.post('/', requireAuth, async (req, res, next) => {
       const r = await query(
         `INSERT INTO announcements (house_id, author_id, title, body, pinned, expires_at)
          VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [req.user.house_id, req.user.id, title, body, !!pinned, exp
-    }
-
-    const isOwner = ['owner', 'admin'].includes(req.user.role);
-
-    // Inquilino solo puede publicar en su propia casa, sin target (chat de casa)
-    if (!isOwner) {
-      const r = await query(
-        `INSERT INTO announcements (house_id, author_id, title, body, pinned, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
         [req.user.house_id, req.user.id, title, body, !!pinned, exp]
       );
       pushAnnouncement(r.rows[0], { houseId: req.user.house_id, authorId: req.user.id, title, body });
       return res.status(201).json({ announcement: r.rows[0], count: 1 });
     }
 
-    // Dueño: 3 alcances, expires_at)
-           VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-          [h.id, req.user.id, title, body, !!pinned, exp
+    // Dueño: 3 alcances
+    if (scope === 'all') {
+      const houses = await query(
         `SELECT id FROM houses WHERE owner_id=$1 AND COALESCE(status,'available')<>'archived'`,
         [req.user.id]
       );
@@ -135,11 +126,12 @@ router.post('/', requireAuth, async (req, res, next) => {
     }
 
     if (scope === 'user') {
-      if (!target_user_id) return res.status(400).json({ error: 'Falta destinatario' });, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [u.rows[0].house_id, req.user.id, title, body, !!pinned, target_user_id, exp
-         JOIN houses h ON h.id = u.house_id
-         WHERE u.id = $1`, [target_user_id]
+      if (!target_user_id) return res.status(400).json({ error: 'Falta destinatario' });
+      const u = await query(
+        `SELECT u.house_id, h.owner_id
+           FROM users u
+           JOIN houses h ON h.id = u.house_id
+          WHERE u.id = $1`, [target_user_id]
       );
       if (!u.rows[0] || u.rows[0].owner_id !== req.user.id) {
         return res.status(403).json({ error: 'Inquilino no encontrado en tus propiedades' });
@@ -149,9 +141,9 @@ router.post('/', requireAuth, async (req, res, next) => {
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
         [u.rows[0].house_id, req.user.id, title, body, !!pinned, target_user_id, exp]
       );
-      pushAnnouncement(r.rows[0], { targetUserId: target_user_id, authorId, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [targetHouse, req.user.id, title, body, !!pinned, exp
+      pushAnnouncement(r.rows[0], { targetUserId: target_user_id, authorId: req.user.id, title, body });
+      return res.status(201).json({ announcement: r.rows[0], count: 1 });
+    }
 
     // scope === 'house' (default)
     const targetHouse = house_id;
