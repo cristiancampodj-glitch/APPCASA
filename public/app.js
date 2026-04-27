@@ -65,6 +65,8 @@ function fmtMoney(n, currency) {
   } catch { return cur + ' ' + (Number(n)||0).toLocaleString(); }
 }
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString('es-CO',{ day:'2-digit', month:'short', year:'numeric' }) : '—';
+const PAY_STATUS_ES = { paid:'Pagado', pending:'Pendiente', overdue:'En mora', partial:'Parcial', cancelled:'Cancelado' };
+const fmtPayStatus = (s) => PAY_STATUS_ES[s] || s || '';
 
 // ===================== STATE =====================
 const state = {
@@ -473,7 +475,7 @@ async function loadPayments(container, house) {
         p.notes && el('div', { class:'meta' }, '📝 ' + p.notes)
       ),
       el('div', { class:'list-actions' },
-        el('span', { class:'badge ' + p.status }, p.status),
+        el('span', { class:'badge ' + p.status }, fmtPayStatus(p.status)),
         p.receipt_url &&
           el('a', { class:'btn sm ghost', href: p.receipt_url, target:'_blank', title:'Comprobante' }, '📎'),
         p.status !== 'paid' && state.user.role !== 'tenant' &&
@@ -1013,7 +1015,7 @@ async function tenantHistory(c) {
           (p.status === 'paid' ? 'Pagado ' + fmtDate(p.paid_at) : 'Vence ' + fmtDate(p.due_date)))
       ),
       el('div', { class:'list-actions' },
-        el('span', { class:'badge ' + p.status }, p.status),
+        el('span', { class:'badge ' + p.status }, fmtPayStatus(p.status)),
         p.status === 'paid' &&
           el('a', { class:'btn sm ghost', href:`/api/payments/${p.id}/receipt.pdf`, target:'_blank' }, '📄')
       )
@@ -1087,7 +1089,7 @@ async function viewAllPayments(c) {
         el('div', { class:'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`)
       ),
       el('div', { class:'list-actions' },
-        el('span', { class:'badge ' + p.status }, p.status),
+        el('span', { class:'badge ' + p.status }, fmtPayStatus(p.status)),
         p.status !== 'paid' && state.user.role !== 'tenant' &&
           el('button', { class:'btn sm success', onclick:()=> markPaid(p) }, '✓ Pagado')
       )
