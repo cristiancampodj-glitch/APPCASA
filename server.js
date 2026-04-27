@@ -68,7 +68,8 @@ app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
 // --- Manejo errores ---
 app.use((err, req, res, next) => {
-  console.error('[ERR]', err);
+  console.error('[ERR]', req.method, req.originalUrl, '-', err.message);
+  if (err.stack) console.error(err.stack);
   res.status(err.status || 500).json({ error: err.message || 'Internal Server Error' });
 });
 
