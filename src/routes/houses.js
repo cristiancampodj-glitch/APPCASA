@@ -19,6 +19,18 @@ router.get('/', requireAuth, async (req, res, next) => {
            WHERE p.house_id = h.id AND p.status IN ('overdue','pending') AND p.due_date < CURRENT_DATE) AS overdue_count,
         (SELECT COALESCE(SUM(amount - COALESCE(amount_paid,0)),0)::float FROM payments p
            WHERE p.house_id = h.id AND p.status IN ('overdue','pending') AND p.due_date < CURRENT_DATE) AS overdue_amount,
+        (SELECT COUNT(*)::int FROM utility_bill_shares s
+           JOIN utility_bills b ON b.id = s.bill_id
+           WHERE s.house_id = h.id AND s.paid = FALSE
+             AND (b.due_date IS NULL OR b.due_date < CURRENT_DATE)) AS utility_overdue_count,
+        (SELECT COALESCE(SUM(s.amount),0)::float FROM utility_bill_shares s
+           JOIN utility_bills b ON b.id = s.bill_id
+           WHERE s.house_id = h.id AND s.paid = FALSE
+             AND (b.due_date IS NULL OR b.due_date < CURRENT_DATE)) AS utility_overdue_amount,
+        (SELECT COUNT(*)::int FROM utility_bill_shares s
+           WHERE s.house_id = h.id AND s.paid = FALSE) AS utility_pending_count,
+        (SELECT COALESCE(SUM(s.amount),0)::float FROM utility_bill_shares s
+           WHERE s.house_id = h.id AND s.paid = FALSE) AS utility_pending_amount,
         (SELECT COUNT(*)::int FROM damages d
            WHERE d.house_id = h.id AND d.status IN ('reported','in_progress')) AS damages_count,
         (SELECT COUNT(*)::int FROM chores c

@@ -281,6 +281,10 @@ function renderPropCard(h) {
   const alerts = [];
   if (h.overdue_count > 0)
     alerts.push(el('span', { class:'prop-alert danger' }, `⚠️ ${h.overdue_count} pago${h.overdue_count>1?'s':''} en mora · ${fmtMoney(h.overdue_amount, h.currency)}`));
+  if (h.utility_overdue_count > 0)
+    alerts.push(el('span', { class:'prop-alert danger' }, `🧾 ${h.utility_overdue_count} recibo${h.utility_overdue_count>1?'s':''} vencido${h.utility_overdue_count>1?'s':''} · ${fmtMoney(h.utility_overdue_amount, h.currency)}`));
+  else if (h.utility_pending_count > 0)
+    alerts.push(el('span', { class:'prop-alert warning' }, `🧾 ${h.utility_pending_count} recibo${h.utility_pending_count>1?'s':''} por pagar · ${fmtMoney(h.utility_pending_amount, h.currency)}`));
   if (h.damages_count > 0)
     alerts.push(el('span', { class:'prop-alert warning' }, `🛠️ ${h.damages_count} daño${h.damages_count>1?'s':''} pendiente${h.damages_count>1?'s':''}`));
   if (h.income_month > 0)
