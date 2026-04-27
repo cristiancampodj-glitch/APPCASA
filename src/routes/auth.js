@@ -87,4 +87,18 @@ router.post('/accept-terms', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// POST /api/auth/refresh — renueva el JWT si la sesión sigue válida
+router.post('/refresh', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT id, role, house_id, email FROM users WHERE id = $1 AND is_active = TRUE`,
+      [req.user.id]
+    );
+    const u = r.rows[0];
+    if (!u) return res.status(401).json({ error: 'Sesión inválida' });
+    const token = sign({ id: u.id, role: u.role, house_id: u.house_id, email: u.email });
+    res.json({ token });
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

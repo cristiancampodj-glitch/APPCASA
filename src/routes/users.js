@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const { query } = require('../db');
 const { hash } = require('../auth');
-const { requireAuth, requireRole, audit } = require('../middleware');
+const { requireAuth, requireRole, audit, invalidateUserCache } = require('../middleware');
 
 // Helper: ¿el owner es dueño de la casa del usuario target?
 async function ownerOwnsUser(ownerId, targetUserId) {
@@ -82,6 +82,7 @@ router.patch('/:id', requireAuth, async (req, res, next) => {
     );
     if (password_hash) audit(req, 'reset_password', 'users', id);
     if (newEmail) audit(req, 'update_email', 'users', id);
+    invalidateUserCache(id);
     res.json({ user: r.rows[0] });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Ese correo ya está en uso' });
@@ -101,6 +102,7 @@ router.post('/:id/end-contract', requireAuth, requireRole('owner','admin'), asyn
                   WHERE tenant_id = $1 AND status = 'active'`, [id]);
     await query(`UPDATE users SET is_active = FALSE, house_id = NULL WHERE id = $1`, [id]);
     audit(req, 'end_contract', 'users', id);
+    invalidateUserCache(id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -114,6 +116,7 @@ router.delete('/:id', requireAuth, requireRole('owner','admin'), async (req, res
     }
     await query('UPDATE users SET is_active = FALSE WHERE id = $1', [id]);
     audit(req, 'deactivate_user', 'users', id);
+    invalidateUserCache(id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });

@@ -13,6 +13,15 @@ const API = {
     const tk = this.token(); if (tk) headers.Authorization = `Bearer ${tk}`;
     const r = await fetch(path, { ...opts, headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
     let data; try { data = await r.json(); } catch { data = {}; }
+    if (r.status === 401 || r.status === 403) {
+      // Token inválido / cuenta desactivada → forzar logout
+      const msg = data.error || (r.status === 403 ? 'Cuenta desactivada' : 'Sesión expirada');
+      this.setToken(null);
+      try { localStorage.removeItem('user'); } catch {}
+      if (typeof toast === 'function') toast(msg, 'error');
+      setTimeout(() => location.reload(), 600);
+      throw new Error(msg);
+    }
     if (!r.ok) throw new Error(data.error || `Error ${r.status}`);
     return data;
   },
@@ -20,6 +29,12 @@ const API = {
   post(p, b) { return this.req(p, { method:'POST', body: b }); },
   patch(p,b) { return this.req(p, { method:'PATCH', body: b }); },
   del(p)     { return this.req(p, { method:'DELETE' }); },
+  async refresh() {
+    try {
+      const { token } = await this.post('/api/auth/refresh', {});
+      if (token) this.setToken(token);
+    } catch {}
+  },
   async openPdf(path, filename) {
     const tk = this.token();
     const r = await fetch(path, { headers: tk ? { Authorization:`Bearer ${tk}` } : {} });
@@ -152,6 +167,8 @@ async function boot() {
   try {
     const { user } = await API.get('/api/auth/me');
     state.user = user;
+    // Refrescar token cada 6 horas mientras la pestaña esté abierta
+    setInterval(() => API.refresh(), 6 * 60 * 60 * 1000);
   } catch {
     API.setToken(null);
   }
