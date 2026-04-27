@@ -183,16 +183,8 @@ function renderApp() {
     )
   );
 
-  // Mobile header
-  const mobHeader = el('header', { class:'mobile-header' },
-    el('div', { class:'brand' }, el('span', { class:'brand-icon' }, '🏡'), 'Mi Casa'),
-    el('button', { class:'icon-btn', onclick:()=> setTheme(state.theme === 'dark' ? 'light' : 'dark') },
-      state.theme === 'dark' ? '☀️' : '🌙')
-  );
-
   // Main
   const main = el('main', { class:'main' });
-  main.append(mobHeader);
   renderView(main);
 
   // Bottom nav (mobile)
