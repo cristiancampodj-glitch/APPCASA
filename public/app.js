@@ -425,6 +425,13 @@ async function viewHouseDetail(c) {
   c.append(sec2);
   loadPayments(sec2, h);
 
+  // 🧾 Recibos de servicios (parte que le toca a esta casa)
+  const secBills = el('div', { class:'detail-section' },
+    el('h3', {}, '🧾 Recibos de servicios')
+  );
+  c.append(secBills);
+  loadHouseBills(secBills, h);
+
   // Daños
   const sec3 = el('div', { class:'detail-section' },
     el('h3', {}, '🛠️ Daños reportados')
@@ -464,14 +471,18 @@ async function loadPayments(container, house) {
     filtered.forEach(p => list.append(el('div', { class:'list-item' },
       el('div', {},
         el('div', { class:'name' }, `${p.period_month}/${p.period_year} — ${p.tenant_name || ''}`),
-        el('div', { class:'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`)
+        el('div', { class:'meta' }, `Vence ${fmtDate(p.due_date)} · ${fmtMoney(p.amount, p.currency)}`),
+        p.reference && el('div', { class:'meta' }, '📌 ' + p.reference),
+        p.notes && el('div', { class:'meta' }, '📝 ' + p.notes)
       ),
       el('div', { class:'list-actions' },
         el('span', { class:'badge ' + p.status }, p.status),
+        p.receipt_url &&
+          el('a', { class:'btn sm ghost', href: p.receipt_url, target:'_blank', title:'Comprobante' }, '📎'),
         p.status !== 'paid' && state.user.role !== 'tenant' &&
           el('button', { class:'btn sm', onclick:()=> remindPayment(p, house) }, '📲 Recordar'),
-        p.status !== 'paid' && state.user.role !== 'tenant' &&
-          el('button', { class:'btn sm success', onclick:()=> markPaid(p) }, '✓ Pagado'),
+        p.status !== 'paid' &&
+          el('button', { class:'btn sm success', onclick:()=> markPaid(p) }, '✓ Pagar'),
         p.status === 'paid' &&
           el('a', { class:'btn sm ghost', href:`/api/payments/${p.id}/receipt.pdf`, target:'_blank' }, '📄 PDF')
       )
@@ -480,8 +491,47 @@ async function loadPayments(container, house) {
   } catch (e) { container.append(emptyState('⚠️', e.message)); }
 }
 
-async function loadDamages(container, house) {
+async function loadHouseBills(container, house) {
   try {
+    const { bills } = await API.get('/api/utility-bills');
+    // filtrar shares de esta casa
+    const rows = [];
+    (bills || []).forEach(b => {
+      (b.shares || []).filter(s => s && s.house_id === house.id)
+        .forEach(s => rows.push({ bill: b, share: s }));
+    });
+    if (!rows.length) { container.append(emptyState('🧾', 'Sin recibos para esta casa')); return; }
+    const list = el('div', { class:'list' });
+    rows.forEach(({ bill, share }) => {
+      const meta = utilMeta(bill.type);
+      list.append(el('div', { class:'list-item' },
+        el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' } },
+          el('div', { style:{ fontSize:'24px' } }, meta.icon),
+          el('div', {},
+            el('div', { class:'name' }, `${meta.label} — ${bill.period_month}/${bill.period_year}`),
+            el('div', { class:'meta' },
+              `Le toca: ${fmtMoney(share.amount)}` +
+              (bill.due_date ? ` · Vence ${fmtDate(bill.due_date)}` : '')),
+            share.reference && el('div', { class:'meta' }, '📌 ' + share.reference),
+            share.notes && el('div', { class:'meta' }, '📝 ' + share.notes)
+          )
+        ),
+        el('div', { class:'list-actions' },
+          bill.bill_url &&
+            el('a', { class:'btn sm ghost', href: bill.bill_url, target:'_blank', title:'Recibo del servicio' }, '🧾'),
+          share.receipt_url &&
+            el('a', { class:'btn sm ghost', href: share.receipt_url, target:'_blank', title:'Comprobante' }, '📎'),
+          el('span', { class:'badge ' + (share.paid ? 'paid' : 'pending') }, share.paid ? 'Pagado' : 'Pendiente'),
+          !share.paid &&
+            el('button', { class:'btn sm success', onclick:()=> paidShare(share, bill) }, '✓ Pagar')
+        )
+      ));
+    });
+    container.append(list);
+  } catch (e) { container.append(emptyState('⚠️', e.message)); }
+}
+
+async function loadDamages(container, house) {  try {
     const { damages } = await API.get('/api/damages');
     const filtered = (damages || []).filter(d => d.house_id === house.id);
     if (!filtered.length) { container.append(emptyState('✅', 'Sin daños reportados')); return; }
@@ -633,12 +683,109 @@ function openCreatePayment(house) {
 }
 
 async function markPaid(p) {
-  if (!confirm('¿Marcar este pago como recibido?')) return;
-  try {
-    await API.patch(`/api/payments/${p.id}/pay`, { method:'transfer', amount_paid: p.amount });
-    toast('Pago registrado ✅', 'success');
-    state.currentHouseId = null; render();
-  } catch (e) { toast(e.message, 'error'); }
+  openProofModal({
+    title: `💰 Registrar pago — ${p.period_month}/${p.period_year}`,
+    subtitleDefault: `Arriendo ${p.period_month}/${p.period_year}`,
+    amount: p.amount,
+    currency: p.currency,
+    onSubmit: async ({ receipt_url, reference, notes }) => {
+      await API.patch(`/api/payments/${p.id}/pay`, {
+        method: 'transfer',
+        amount_paid: p.amount,
+        reference, receipt_url, notes
+      });
+    }
+  });
+}
+
+// Modal genérico para subir comprobante (foto/PDF como dataURL), asunto y nota
+function openProofModal({ title, subtitleDefault, amount, currency, onSubmit }) {
+  let receiptDataUrl = null;
+  const preview = el('div', {
+    style:{ minHeight:'80px', padding:'10px', border:'1px dashed var(--border)',
+            borderRadius:'10px', textAlign:'center', color:'var(--text-muted)' }
+  }, '📎 Adjunta una foto o PDF del comprobante (opcional)');
+
+  const fileInput = el('input', { type:'file', accept:'image/*,application/pdf', style:{ display:'none' } });
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0]; if (!file) return;
+    if (file.size > 6 * 1024 * 1024) return toast('Archivo muy grande (máx 6MB)', 'error');
+    const reader = new FileReader();
+    reader.onload = () => {
+      receiptDataUrl = reader.result;
+      preview.innerHTML = '';
+      if (file.type.startsWith('image/')) {
+        preview.append(el('img', { src: receiptDataUrl,
+          style:{ maxWidth:'100%', maxHeight:'200px', borderRadius:'8px' } }));
+      } else {
+        preview.append(el('div', { style:{ padding:'20px' } },
+          el('div', { style:{ fontSize:'42px' } }, '📄'),
+          el('div', {}, file.name)));
+      }
+      preview.append(el('div', { class:'meta', style:{ marginTop:'6px' } },
+        '✅ Adjuntado · ' + Math.round(file.size/1024) + ' KB'));
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const f = el('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(f));
+    btnSubmit.disabled = true; btnSubmit.textContent = '⏳ Enviando...';
+    try {
+      await onSubmit({
+        receipt_url: receiptDataUrl,
+        reference: data.reference || null,
+        notes: data.notes || null
+      });
+      m.close(); toast('Pago registrado ✅', 'success'); render();
+    } catch (err) {
+      toast(err.message, 'error');
+      btnSubmit.disabled = false; btnSubmit.textContent = '💾 Registrar pago';
+    }
+  }});
+
+  const btnSubmit = el('button', { class:'btn lg block success', type:'submit' }, '💾 Registrar pago');
+
+  f.append(
+    amount && el('div', { style:{ textAlign:'center', padding:'4px 0 12px' } },
+      el('div', { class:'meta' }, 'Monto'),
+      el('div', { style:{ fontSize:'32px', fontWeight:'800', color:'var(--primary)' } },
+        fmtMoney(amount, currency))
+    ),
+    el('div', { class:'field' },
+      el('label', {}, '📌 Asunto / concepto'),
+      el('input', { name:'reference', type:'text', value: subtitleDefault || '',
+        placeholder:'Ej: Arriendo abril, Recibo gas marzo' })
+    ),
+    el('div', { class:'field' },
+      el('label', {}, '📝 Nota (opcional)'),
+      el('textarea', { name:'notes', rows:2, placeholder:'Comentario adicional…' })
+    ),
+    el('div', { class:'field' },
+      el('label', {}, '📷 Comprobante'),
+      preview,
+      el('button', { type:'button', class:'btn block', style:{ marginTop:'8px' },
+        onclick: () => fileInput.click() }, '📎 Seleccionar archivo'),
+      fileInput
+    ),
+    btnSubmit
+  );
+
+  const m = modal(el('div', {}, el('h3', {}, title), f));
+}
+
+// Pagar parte de un recibo (utility share) con comprobante
+function paidShare(share, bill) {
+  const meta = utilMeta(bill.type);
+  openProofModal({
+    title: `${meta.icon} Pagar ${meta.label} — ${bill.period_month}/${bill.period_year}`,
+    subtitleDefault: `${meta.label} ${bill.period_month}/${bill.period_year}`,
+    amount: share.amount,
+    onSubmit: async ({ receipt_url, reference, notes }) => {
+      await API.patch(`/api/utility-bills/shares/${share.id}/pay`, { receipt_url, reference, notes });
+    }
+  });
 }
 
 // Recordatorio de pago vía WhatsApp (sin Twilio): abre wa.me con texto pre-llenado
@@ -1276,14 +1423,14 @@ async function viewBills(c) {
         },
           el('div', {},
             el('b', {}, '🏠 ' + (s.house_name || '—')),
-            el('div', { class:'meta' }, fmtMoney(s.amount))
+            el('div', { class:'meta' }, fmtMoney(s.amount)),
+            s.reference && el('div', { class:'meta' }, '📌 ' + s.reference),
+            s.notes && el('div', { class:'meta' }, '📝 ' + s.notes)
           ),
           el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' } },
+            s.receipt_url && el('a', { class:'btn sm ghost', href: s.receipt_url, target:'_blank' }, '📎'),
             el('span', { class:'badge ' + (s.paid ? 'paid' : 'pending') }, s.paid ? 'Pagado' : 'Pendiente'),
-            !s.paid && el('button', { class:'btn sm success', onclick: async ()=>{
-              try { await API.patch(`/api/utility-bills/shares/${s.id}/pay`); toast('Marcado pagado','success'); render(); }
-              catch(e){ toast(e.message,'error'); }
-            }}, '✓ Pagado')
+            !s.paid && el('button', { class:'btn sm success', onclick:()=> paidShare(s, b) }, '✓ Pagar')
           )
         ));
       });

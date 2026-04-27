@@ -123,14 +123,42 @@ router.post('/:id/checkout', requireAuth, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// PATCH /api/payments/:id/pay — registro manual
-router.patch('/:id/pay', requireAuth, requireRole('owner','admin'), async (req, res, next) => {
+// PATCH /api/payments/:id/pay — el dueño confirma pago, o el inquilino sube comprobante
+router.patch('/:id/pay', requireAuth, async (req, res, next) => {
   try {
-    const { method, amount_paid, reference } = req.body;
+    const { method, amount_paid, reference, receipt_url, notes } = req.body;
+
+    // Verificar que el pago exista y permisos
+    const cur = await query(
+      `SELECT p.*, h.owner_id FROM payments p JOIN houses h ON h.id = p.house_id WHERE p.id = $1`,
+      [req.params.id]
+    );
+    const p = cur.rows[0];
+    if (!p) return res.status(404).json({ error: 'Pago no encontrado' });
+
+    if (req.user.role === 'tenant' && p.tenant_id !== req.user.id) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+    if (req.user.role === 'owner' && p.owner_id && p.owner_id !== req.user.id) {
+      return res.status(403).json({ error: 'No autorizado' });
+    }
+
+    // Limitar tamaño del comprobante si viene como dataURL
+    if (receipt_url && receipt_url.length > 8_000_000) {
+      return res.status(413).json({ error: 'Comprobante demasiado grande (máx ~6MB)' });
+    }
+
     const r = await query(
-      `UPDATE payments SET status='paid', paid_at=NOW(), method=$2, amount_paid=$3, reference=$4
+      `UPDATE payments SET
+         status      = 'paid',
+         paid_at     = NOW(),
+         method      = COALESCE($2, method),
+         amount_paid = COALESCE($3, amount_paid),
+         reference   = COALESCE($4, reference),
+         receipt_url = COALESCE($5, receipt_url),
+         notes       = COALESCE($6, notes)
        WHERE id = $1 RETURNING *`,
-      [req.params.id, method || 'transfer', amount_paid, reference || null]
+      [req.params.id, method || null, amount_paid || p.amount, reference || null, receipt_url || null, notes || null]
     );
     audit(req, 'mark_paid', 'payments', req.params.id);
     res.json({ payment: r.rows[0] });

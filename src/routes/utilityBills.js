@@ -125,9 +125,11 @@ router.post('/', requireAuth, requireRole('owner','admin'), async (req, res, nex
   } catch (e) { next(e); }
 });
 
-// PATCH /api/utility-bills/shares/:id/pay — marcar parte pagada
+// PATCH /api/utility-bills/shares/:id/pay — marcar parte pagada (con comprobante opcional)
 router.patch('/shares/:id/pay', requireAuth, async (req, res, next) => {
   try {
+    const { receipt_url, reference, notes } = req.body;
+
     // Si es tenant, debe ser de su casa
     const ck = await query(
       `SELECT s.*, b.owner_id FROM utility_bill_shares s
@@ -144,9 +146,19 @@ router.patch('/shares/:id/pay', requireAuth, async (req, res, next) => {
       return res.status(403).json({ error: 'No autorizado' });
     }
 
+    if (receipt_url && receipt_url.length > 8_000_000) {
+      return res.status(413).json({ error: 'Comprobante demasiado grande (máx ~6MB)' });
+    }
+
     const r = await query(
-      `UPDATE utility_bill_shares SET paid = TRUE, paid_at = NOW() WHERE id = $1 RETURNING *`,
-      [req.params.id]
+      `UPDATE utility_bill_shares SET
+         paid = TRUE,
+         paid_at = NOW(),
+         receipt_url = COALESCE($2, receipt_url),
+         reference   = COALESCE($3, reference),
+         notes       = COALESCE($4, notes)
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, receipt_url || null, reference || null, notes || null]
     );
     audit(req, 'pay_utility_share', 'utility_bill_shares', r.rows[0].id);
     res.json({ share: r.rows[0] });
