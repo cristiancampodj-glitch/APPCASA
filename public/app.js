@@ -219,18 +219,19 @@ function currencyField() {
 // ===================== APP SHELL =====================
 function renderApp() {
   const layout = el('div', { class:'layout' });
+  const isTenant = state.user.role === 'tenant';
 
   // Sidebar (desktop)
   const sidebar = el('aside', { class:'sidebar' },
     el('div', { class:'brand' }, el('span', { class:'brand-icon' }, '🏡'), 'Mi Casa'),
     el('nav', { class:'nav' },
-      navBtn('home',     '🏠', state.user.role === 'tenant' ? 'Mi Apartamento' : 'Mis Propiedades'),
+      navBtn('home',     '🏠', isTenant ? 'Mi Apartamento' : 'Mis Propiedades'),
       navBtn('payments', '💰', 'Pagos'),
       navBtn('bills',    '🧾', 'Recibos'),
       navBtn('contracts','📄', 'Contratos'),
       navBtn('damages',  '🛠️', 'Daños'),
       navBtn('messages', '💬', 'Avisos'),
-      navBtn('settings', '⚙️', 'Ajustes')
+      !isTenant && navBtn('settings', '⚙️', 'Ajustes')
     ),
     el('div', { class:'sidebar-footer' },
       el('button', { class:'nav-btn', onclick: logout }, el('span',{ class:'nav-icon'},'🚪'), 'Cerrar sesión')
@@ -249,7 +250,9 @@ function renderApp() {
     bottomBtn('contracts', '📄', 'Contrato'),
     bottomBtn('damages', '🛠️', 'Daños'),
     bottomBtn('messages', '💬', 'Avisos'),
-    bottomBtn('settings', '⚙️', 'Más')
+    isTenant
+      ? el('button', { onclick: logout }, el('span', { class:'icon' }, '🚪'), 'Salir')
+      : bottomBtn('settings', '⚙️', 'Más')
   );
 
   layout.append(sidebar, main, bottom);
@@ -280,7 +283,7 @@ function renderView(c) {
     case 'contracts': return viewContracts(c);
     case 'damages':   return viewAllDamages(c);
     case 'messages':  return viewAnnouncements(c);
-    case 'settings':  return viewSettings(c);
+    case 'settings':  return state.user.role === 'tenant' ? viewTenantHome(c) : viewSettings(c);
     default: return viewProperties(c);
   }
 }
@@ -1270,7 +1273,7 @@ async function viewAnnouncements(c) {
   const isOwner = ['owner','admin'].includes(state.user.role);
   c.append(el('div', { class:'topbar' },
     el('h1', {}, '💬 Avisos'),
-    el('div', { class:'topbar-actions' },
+    isOwner && el('div', { class:'topbar-actions' },
       el('button', { class:'btn', onclick: openComposeAnnouncement }, '✏️ Nuevo aviso')
     )
   ));
