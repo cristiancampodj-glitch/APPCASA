@@ -50,6 +50,58 @@ function modal(content) {
   return { close: () => back.remove() };
 }
 
+// Modal bonito para mostrar credenciales (correo + contraseña) con copiar y WhatsApp
+function showCredentialsModal({ title, subtitle, email, password }) {
+  const copy = async (text, label) => {
+    try { await navigator.clipboard.writeText(text); toast(`${label} copiado`, 'success'); }
+    catch { toast('No se pudo copiar', 'error'); }
+  };
+  const row = (icon, label, value, copyLabel) => el('div', {
+    class:'cred-row',
+    style:{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px',
+            padding:'12px 14px', background:'var(--bg-soft, rgba(255,255,255,.05))',
+            borderRadius:'10px', marginBottom:'10px' }
+  },
+    el('div', { style:{ flex:'1', minWidth:'0' } },
+      el('div', { style:{ fontSize:'12px', color:'var(--text-muted)' } }, `${icon} ${label}`),
+      el('div', { style:{ fontWeight:'600', wordBreak:'break-all' } }, value)
+    ),
+    el('button', { class:'btn sm ghost', onclick:()=> copy(value, copyLabel) }, '📋')
+  );
+  const m = modal(el('div', {},
+    el('h3', {}, title),
+    el('p', { style:{ color:'var(--text-muted)', marginBottom:'14px' } }, subtitle),
+    row('📧', 'Correo', email, 'Correo'),
+    row('🔑', 'Contraseña', password, 'Contraseña'),
+    el('div', { style:{ display:'flex', gap:'8px', marginTop:'8px' } },
+      el('button', {
+        class:'btn lg block',
+        onclick:()=> copy(`Correo: ${email}\nContraseña: ${password}`, 'Datos')
+      }, '📋 Copiar todo'),
+      el('button', {
+        class:'btn lg block ghost',
+        onclick:()=> { m.close(); }
+      }, 'Cerrar')
+    )
+  ));
+}
+
+// Modal de confirmación bonito (reemplaza confirm nativo)
+function confirmModal({ title, message, confirmText='Confirmar', cancelText='Cancelar', danger=false }) {
+  return new Promise((resolve) => {
+    const m = modal(el('div', {},
+      el('h3', {}, title),
+      el('p', { style:{ color:'var(--text-muted)', marginBottom:'16px', whiteSpace:'pre-line' } }, message),
+      el('div', { style:{ display:'flex', gap:'8px' } },
+        el('button', { class:'btn lg block ghost',
+          onclick:()=> { m.close(); resolve(false); } }, cancelText),
+        el('button', { class:'btn lg block ' + (danger ? 'danger' : ''),
+          onclick:()=> { m.close(); resolve(true); } }, confirmText)
+      )
+    ));
+  });
+}
+
 // ===================== Money =====================
 function fmtMoney(n, currency) {
   const cur = (currency || 'COP').toUpperCase();
@@ -582,7 +634,12 @@ function openManageTenant(tenant, house) {
           m.close();
           toast('Datos actualizados ✅', 'success');
           if (payload.password) {
-            alert(`Nueva contraseña de ${tenant.name}:\n\nCorreo: ${payload.email || tenant.email}\nContraseña: ${payload.password}\n\nCompártela con tu inquilino.`);
+            showCredentialsModal({
+              title: '🔑 Nueva contraseña asignada',
+              subtitle: `Comparte estos datos con ${tenant.name}:`,
+              email: payload.email || tenant.email,
+              password: payload.password
+            });
           }
           state.currentHouseId = null; render();
         } catch (err) { toast(err.message, 'error'); }
@@ -602,7 +659,13 @@ function openManageTenant(tenant, house) {
     el('button', {
       class:'btn lg block danger',
       onclick: async () => {
-        if (!confirm(`¿Terminar el contrato de ${tenant.name}?\n\nSe desactivará su cuenta y se desasignará de la propiedad. Esta acción se puede revertir desde la base de datos.`)) return;
+        const ok = await confirmModal({
+          title: '🚪 Terminar contrato',
+          message: `¿Seguro que quieres terminar el contrato de ${tenant.name}?\n\nSe desactivará su cuenta y se desasignará de la propiedad.`,
+          confirmText: 'Sí, terminar',
+          danger: true
+        });
+        if (!ok) return;
         try {
           await API.post(`/api/users/${tenant.id}/end-contract`, {});
           m.close();
@@ -627,7 +690,12 @@ function openInviteTenant(houseId) {
           const r = await API.post(`/api/houses/${houseId}/invite-tenant`, data);
           m.close();
           toast('Inquilino añadido ✅', 'success');
-          alert(`Comparte estos datos con tu inquilino:\n\nCorreo: ${r.login.email}\nContraseña: ${r.login.password}`);
+          showCredentialsModal({
+            title: '👤 Inquilino creado',
+            subtitle: 'Comparte estos datos con tu inquilino:',
+            email: r.login.email,
+            password: r.login.password
+          });
           render();
         } catch (err) { toast(err.message, 'error'); }
       }});
