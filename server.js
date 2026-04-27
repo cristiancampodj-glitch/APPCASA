@@ -13,6 +13,9 @@ const rateLimit = require('express-rate-limit');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Railway/Render/Fly van detrás de un proxy: confiamos en X-Forwarded-For
+app.set('trust proxy', 1);
+
 // --- Seguridad y middlewares base ---
 app.use(helmet({ contentSecurityPolicy: false })); // CSP desactivada para PWA inline
 app.use(cors({ origin: true, credentials: true }));

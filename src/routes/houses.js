@@ -7,7 +7,7 @@ const { hash } = require('../auth');
 router.get('/', requireAuth, async (req, res, next) => {
   try {
     const isOwner = ['owner', 'admin'].includes(req.user.role);
-    const where = isOwner ? `(h.owner_id = $1 OR h.id = $2)` : `h.id = $2`;
+    const where = isOwner ? `(h.owner_id = $1::uuid OR h.id = $2::uuid)` : `h.id = $2::uuid`;
     const params = [req.user.id, req.user.house_id];
 
     const r = await query(`
