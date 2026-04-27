@@ -198,10 +198,7 @@ function renderApp() {
     bottomBtn('settings', '⚙️', 'Más')
   );
 
-  // FAB IA
-  const fab = el('button', { class:'fab', title:'Asistente', onclick: openAI }, '🤖');
-
-  layout.append(sidebar, main, bottom, fab);
+  layout.append(sidebar, main, bottom);
   return layout;
 }
 function navBtn(view, icon, label) {
